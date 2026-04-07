@@ -218,7 +218,7 @@ def run_task(
 
     rewards = []
     steps_taken = 0
-    score = 0.0
+    score = MIN_STRICT_SCORE
     success = False
 
     with httpx.Client(base_url=ENV_BASE_URL, timeout=30.0) as http:
@@ -245,11 +245,11 @@ def run_task(
                 step_resp.raise_for_status()
                 step_result = step_resp.json()
             except Exception as e:
-                log_step(step=step, action=str(action_dict), reward=0.0, done=False, error=str(e))
+                log_step(step=step, action=str(action_dict), reward=MIN_STRICT_SCORE, done=False, error=str(e))
                 continue
 
             obs = step_result["observation"]
-            reward = float(step_result.get("reward") or 0.0)
+            reward = float(step_result.get("reward") or MIN_STRICT_SCORE)
             done = step_result["done"]
             error = None
             info = step_result.get("info") or {}
@@ -264,7 +264,7 @@ def run_task(
             rewards.append(reward)
             reward_history.append(reward)
             steps_taken = step
-            score = float(info.get("grade_score") or obs.get("current_score") or 0.0)
+            score = float(info.get("grade_score") or obs.get("current_score") or MIN_STRICT_SCORE)
 
             log_step(step=step, action=action_str, reward=reward, done=done, error=error)
 

@@ -86,7 +86,7 @@ class SQLDebugObservation(BaseModel):
     # Progress
     steps_taken: int
     steps_remaining: int
-    current_score: float = Field(description="Current score 0.0-1.0 for this episode")
+    current_score: float = Field(description="Current score in strict range (0, 1) for this episode")
 
     # Contextual help (populated based on action type)
     schema_info: Optional[SchemaInfo] = None
@@ -112,7 +112,7 @@ class SQLDebugReward(BaseModel):
     - schema_bonus: 0.0-0.1 for queries that reference correct tables/columns
     - penalties: negative values for reset_query, infinite loops, destructive SQL
     """
-    value: float = Field(ge=0.0, le=1.0, description="Total reward for this step")
+    value: float = Field(ge=0.001, le=0.999, description="Total reward for this step")
     correctness: float = Field(ge=0.0, le=0.6)
     efficiency: float = Field(ge=0.0, le=0.2)
     syntax_progress: float = Field(ge=0.0, le=0.1)

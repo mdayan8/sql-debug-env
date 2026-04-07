@@ -16,6 +16,13 @@ Total range: 0.0 to 1.0 (clamped to [0.0, 1.0])
 from typing import Optional, List, Dict, Any
 from .models import SQLDebugReward
 
+MIN_STRICT_SCORE = 0.001
+MAX_STRICT_SCORE = 0.999
+
+
+def _strict_score(value: float) -> float:
+    return round(min(MAX_STRICT_SCORE, max(MIN_STRICT_SCORE, value)), 4)
+
 
 def compute_reward(
     action_type: str,
@@ -33,7 +40,7 @@ def compute_reward(
     Args:
     action_type: The action taken this step
     query_result: Result dict from EpisodeDatabase.execute_query()
-    grade_score: 0.0-1.0 score from task grader
+    grade_score: strict (0, 1) score from task grader
     steps_taken: How many steps have been used (1-indexed)
     max_steps: Maximum steps for this task
     previous_best_score: Best grade score seen so far
@@ -103,7 +110,7 @@ def compute_reward(
         penalty += 0.03
 
     total_raw = correctness + efficiency + syntax_progress + schema_bonus - penalty
-    total = round(max(0.0, min(1.0, total_raw)), 4)
+    total = _strict_score(total_raw)
 
     breakdown = (
         f"correctness={correctness:.3f} + "
