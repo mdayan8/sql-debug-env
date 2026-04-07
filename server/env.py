@@ -21,6 +21,7 @@ TASKS = {
     "medium_logic_fix": MediumTask(),
     "hard_multi_bug": HardTask(),
 }
+STRICT_MIN_SCORE = 0.001
 
 
 class SQLDebugEnv:
@@ -57,7 +58,7 @@ class SQLDebugEnv:
                 task_difficulty=self.task.difficulty,
                 original_query=self.task.broken_query,
                 current_query=None,
-                best_score_so_far=0.0,
+                best_score_so_far=STRICT_MIN_SCORE,
                 steps_taken=0,
                 max_steps=self.task.max_steps,
                 action_history=[],
@@ -77,7 +78,7 @@ class SQLDebugEnv:
                 last_query_result=None,
                 steps_taken=0,
                 steps_remaining=self.task.max_steps,
-                current_score=0.0,
+                current_score=STRICT_MIN_SCORE,
                 schema_info=SchemaInfo(tables=self._db.get_schema()),
                 is_done=False,
                 success=False
