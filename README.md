@@ -1,12 +1,3 @@
----
-title: sql-debug-env
-emoji: "🧪"
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
----
-
 # SQL Debug Environment (`sql-debug-env`)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
