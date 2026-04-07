@@ -37,6 +37,12 @@ TASK_CONFIGS = {
     "medium_logic_fix": {"max_steps": 20,  "success_threshold": 0.7},
     "hard_multi_bug":   {"max_steps": 30,  "success_threshold": 0.5},
 }
+MIN_STRICT_SCORE = 0.001
+MAX_STRICT_SCORE = 0.999
+
+
+def strict_score(value: float) -> float:
+    return min(MAX_STRICT_SCORE, max(MIN_STRICT_SCORE, value))
 
 
 # ── Logging functions (EXACT FORMAT — DO NOT MODIFY) ────────────────────────
@@ -266,7 +272,7 @@ def run_task(
                 break
 
     # Compute final score
-    score = min(max(score, 0.0), 1.0)
+    score = strict_score(score)
     success = score >= success_threshold
 
     log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
@@ -310,7 +316,7 @@ def main():
             all_results.append(result)
         except Exception as e:
             print(f"[DEBUG] Task {task_id} failed: {e}", flush=True)
-            log_end(success=False, steps=0, score=0.0, rewards=[])
+            log_end(success=False, steps=0, score=MIN_STRICT_SCORE, rewards=[])
 
         # Small delay between tasks
         time.sleep(2)
