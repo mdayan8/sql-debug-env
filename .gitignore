@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# local env / secrets
+.env
+.env.*
+!.env.example
+
+# OpenEnv / uv
+.venv/
+.python-version
+
+# editor metadata
+.cursor/
+
