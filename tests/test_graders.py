@@ -9,22 +9,22 @@ class TestGraders(unittest.TestCase):
     def test_easy_grade_perfect(self):
         task = EasyTask()
         score = task.grade(task.expected_output)
-        self.assertAlmostEqual(score, 1.0, places=3)
+        self.assertAlmostEqual(score, 0.999, places=3)
 
     def test_hard_grade_perfect(self):
         task = HardTask()
         score = task.grade(task.expected_output)
-        self.assertAlmostEqual(score, 1.0, places=3)
+        self.assertAlmostEqual(score, 0.999, places=3)
 
     def test_easy_grade_empty(self):
         task = EasyTask()
         score = task.grade(None)
-        self.assertEqual(score, 0.0)
+        self.assertAlmostEqual(score, 0.001, places=3)
 
     def test_medium_grader_perfect(self):
         task = MediumTask()
         score = MediumTaskGrader.grade(task.expected_output)
-        self.assertAlmostEqual(score, 1.0, places=3)
+        self.assertAlmostEqual(score, 0.999, places=3)
 
     def test_medium_grader_partial(self):
         # Flip one row's avg_salary so it no longer matches within tolerance.
@@ -37,7 +37,7 @@ class TestGraders(unittest.TestCase):
                 r["avg_salary"] = 12345.0
 
         score = MediumTaskGrader.grade(actual)
-        self.assertLess(score, 1.0)
+        self.assertLess(score, 0.999)
         self.assertAlmostEqual(score, 0.75, places=3)
 
 

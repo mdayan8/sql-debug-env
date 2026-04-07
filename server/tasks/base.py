@@ -4,6 +4,16 @@ from typing import Dict, Any, List, Optional, Tuple
 
 
 class BaseTask(ABC):
+    _MIN_STRICT_SCORE = 0.001
+    _MAX_STRICT_SCORE = 0.999
+
+    def _strict_score(self, score: float) -> float:
+        """Keep task score strictly inside (0, 1) for validator compatibility."""
+        return round(
+            min(self._MAX_STRICT_SCORE, max(self._MIN_STRICT_SCORE, score)),
+            3,
+        )
+
     """
     Abstract base for all tasks.
 
@@ -93,19 +103,19 @@ class BaseTask(ABC):
         - 0.0: null result, syntax error, or empty when non-empty expected
         """
         if not actual_rows:
-            return 0.0
+            return self._strict_score(0.0)
 
         expected = self.expected_output
 
         if not expected:
             # Expected empty result
-            return 1.0 if len(actual_rows) == 0 else 0.0
+            return self._strict_score(1.0 if len(actual_rows) == 0 else 0.0)
 
         # Exact row count match
         if len(actual_rows) != len(expected):
             # Partial credit for getting some rows right
             overlap = self._count_matching_rows(actual_rows, expected)
-            return round(min(0.5, overlap / max(len(expected), 1) * 0.5), 3)
+            return self._strict_score(min(0.5, overlap / max(len(expected), 1) * 0.5))
 
         # Check row-by-row match (order-sensitive if task requires it)
         matching = self._count_matching_rows(actual_rows, expected)
@@ -118,7 +128,7 @@ class BaseTask(ABC):
             if actual_cols != expected_cols:
                 score *= 0.7  # Penalty for wrong columns
 
-        return round(score, 3)
+        return self._strict_score(score)
 
     def _count_matching_rows(
         self,

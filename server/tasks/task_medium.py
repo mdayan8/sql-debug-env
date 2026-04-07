@@ -127,10 +127,20 @@ class MediumTaskGrader:
     """
     Custom grader for medium task — handles NULL comparison.
     """
+    _MIN_STRICT_SCORE = 0.001
+    _MAX_STRICT_SCORE = 0.999
+
+    @staticmethod
+    def _strict_score(score: float) -> float:
+        return round(
+            min(MediumTaskGrader._MAX_STRICT_SCORE, max(MediumTaskGrader._MIN_STRICT_SCORE, score)),
+            3,
+        )
+
     @staticmethod
     def grade(actual: List[Dict]) -> float:
         if not actual or len(actual) != 4:
-            return 0.0
+            return MediumTaskGrader._strict_score(0.0)
 
         # Sort both by dept name for comparison
         actual_sorted = sorted(actual, key=lambda r: r.get("department_name", ""))
@@ -159,5 +169,5 @@ class MediumTaskGrader:
             if dept_ok and count_ok and salary_ok:
                 matches += 1
 
-        return round(matches / 4, 3)
+        return MediumTaskGrader._strict_score(matches / 4)
 
