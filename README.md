@@ -1,41 +1,13 @@
----
-title: sql-debug-env
-emoji: "🧪"
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
----
-
 # SQL Debug Environment (`sql-debug-env`)
 
-![OpenEnv](https://img.shields.io/badge/OpenEnv-Validated-2ea44f)
-![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?logo=docker&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)
 ![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-In--Memory-003B57?logo=sqlite&logoColor=white)
-![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-111111)
-![OpenAI](https://img.shields.io/badge/OpenAI-Baseline_API-412991?logo=openai&logoColor=white)
-
-<p align="left">
-  <img alt="React (not used in this backend repo)" src="https://img.shields.io/badge/React-UI_optional-61DAFB?logo=react&logoColor=111111">
-  <img alt="Vite (not used in this backend repo)" src="https://img.shields.io/badge/Vite-UI_optional-646CFF?logo=vite&logoColor=white">
-  <img alt="Node.js (not used in this backend repo)" src="https://img.shields.io/badge/Node.js-UI_optional-339933?logo=nodedotjs&logoColor=white">
-  <img alt="Express (not used in this backend repo)" src="https://img.shields.io/badge/Express-UI_optional-000000?logo=express&logoColor=white">
-  <img alt="PostgreSQL (not used in this backend repo)" src="https://img.shields.io/badge/PostgreSQL-Not_used-4169E1?logo=postgresql&logoColor=white">
-  <img alt="MongoDB (not used in this backend repo)" src="https://img.shields.io/badge/MongoDB-Not_used-47A248?logo=mongodb&logoColor=white">
-  <img alt="Tailwind CSS (not used in this backend repo)" src="https://img.shields.io/badge/Tailwind-UI_optional-06B6D4?logo=tailwindcss&logoColor=white">
-  <img alt="Axios (not used in this backend repo)" src="https://img.shields.io/badge/Axios-UI_optional-5A29E4?logo=axios&logoColor=white">
-</p>
+![SQLite](https://img.shields.io/badge/SQLite-In_Memory-003B57?logo=sqlite&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
+![OpenEnv](https://img.shields.io/badge/OpenEnv-Validated-2ea44f)
 
 An OpenEnv environment for a real task people do every day: **debugging SQL**. The agent gets a broken query, a live (in-memory) SQLite database, and a description of the expected output. It can inspect schema/errors/samples and submit fixed queries until it solves the task.
-
-## Why this project matters
-- SQL debugging is a real operational task across analytics and backend teams.
-- The environment is deterministic, fast, and local-first for reliable evaluation.
-- Reward shaping gives useful partial progress signals instead of only pass/fail.
-- The benchmark endpoint provides live runtime evidence for reviewers.
 
 ## What’s in this repo
 - **FastAPI server**: `server/main.py` (endpoints: `/health`, `/tasks`, `/reset`, `/step`, `/state`)
@@ -59,55 +31,12 @@ An OpenEnv environment for a real task people do every day: **debugging SQL**. T
 - Docker-first deployment path (local and Hugging Face Spaces)
 - Local benchmark endpoint for live latency checks (`/benchmark`)
 
-## Architecture
-```mermaid
-flowchart LR
-    Client[Client Agent or Evaluator] --> API[FastAPI Server]
-    API --> Env[SQLDebugEnv]
-    Env --> DB[InMemory SQLite Episode DB]
-    Env --> Tasks[Task Set easy medium hard]
-    Env --> Reward[Reward Engine]
-    Tasks --> Grader[Deterministic Graders]
-    Grader --> Reward
-    Reward --> API
-    API --> Client
-```
-
 ## API Docs (FastAPI Auto Docs)
 Use these for interactive testing in browser:
 
 - Swagger UI: `http://localhost:7860/docs`
 - ReDoc: `http://localhost:7860/redoc`
 - OpenAPI spec: `http://localhost:7860/openapi.json`
-
-## Project Structure
-```text
-sql-debug-env/
-├── Dockerfile
-├── openenv.yaml
-├── inference.py
-├── README.md
-├── requirements.txt
-├── pyproject.toml
-├── uv.lock
-├── scripts/
-│   └── benchmark_local.py
-├── server/
-│   ├── main.py
-│   ├── env.py
-│   ├── models.py
-│   ├── database.py
-│   ├── reward.py
-│   └── tasks/
-│       ├── base.py
-│       ├── task_easy.py
-│       ├── task_medium.py
-│       └── task_hard.py
-└── tests/
-    ├── test_env.py
-    ├── test_graders.py
-    └── test_reward.py
-```
 
 ## Action Space
 | Action | Required fields | Cost / reward effect |
