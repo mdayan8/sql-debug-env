@@ -37,7 +37,7 @@ tasks:
     description: "Fix 5 bugs: correlated subquery, window function, duplicate rows, date logic, CTE scope"
 
 api:
-  base_url: "https://YOUR-USERNAME-sql-debug-env.hf.space"
+  base_url: "https://md896-sql-debug-env.hf.space"
   reset: "/reset"
   step: "/step"
   state: "/state"
