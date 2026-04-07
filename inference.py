@@ -17,8 +17,12 @@ import httpx
 # ── Configuration from environment variables ────────────────────────────────
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
-HF_TOKEN = os.environ.get("HF_TOKEN", "")
-API_KEY = os.environ.get("OPENAI_API_KEY", HF_TOKEN or "sk-placeholder")
+HF_TOKEN = os.environ.get("HF_TOKEN")
+# Optional: used only when running environments via from_docker_image() flows.
+LOCAL_IMAGE_NAME = os.environ.get("LOCAL_IMAGE_NAME")
+
+if not HF_TOKEN:
+    raise RuntimeError("HF_TOKEN is required for inference.py")
 
 # ── Environment config ───────────────────────────────────────────────────────
 ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
@@ -278,7 +282,7 @@ def run_task(
 
 def main():
     """Run baseline agent across all 3 tasks."""
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
     print(f"[DEBUG] Starting SQL Debug Env baseline", flush=True)
     print(f"[DEBUG] Model: {MODEL_NAME}", flush=True)
