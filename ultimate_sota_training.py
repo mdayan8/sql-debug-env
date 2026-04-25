@@ -364,6 +364,11 @@ def run_sota_train():
         device_map="auto",
         attn_implementation=os.environ.get("ATTN_IMPLEMENTATION", "eager"),
     )
+    # Runtime generation safety defaults (used by both eval and GRPO generate path).
+    model.generation_config.remove_invalid_values = True
+    model.generation_config.renormalize_logits = True
+    model.generation_config.top_p = float(os.environ.get("GRPO_TOP_P", "0.9"))
+    model.generation_config.temperature = float(os.environ.get("GRPO_TEMPERATURE", "0.7"))
 
     train_dataset = make_real_dataset()
 
@@ -423,11 +428,6 @@ def run_sota_train():
         max_completion_length=int(os.environ.get("GRPO_MAX_COMPLETION_LEN", "256")),
         temperature=float(os.environ.get("GRPO_TEMPERATURE", "0.7")),
         top_p=float(os.environ.get("GRPO_TOP_P", "0.9")),
-        # Keep generation numerically safe in long sampling loops.
-        generation_kwargs={
-            "remove_invalid_values": True,
-            "renormalize_logits": True,
-        },
         bf16=bool(use_cuda),
         fp16=False,
         num_train_epochs=int(os.environ.get("TRAIN_NUM_EPOCHS", "1")),
