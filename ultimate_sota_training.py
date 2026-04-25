@@ -67,6 +67,7 @@ def bootstrap_deps() -> None:
             "httpx>=0.27.0",
             "datasets>=3.4.1,<4.4.0",
             "trl>=0.18.2,<=0.24.0",
+            "mergekit",
             "wandb",
             "matplotlib",
         ]
