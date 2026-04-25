@@ -1,5 +1,5 @@
 """
-Unsloth + OpenEnv GRPO training (production-oriented).
+OpenEnv GRPO training (production-oriented, simple stack).
 
 Produces real training artifacts (trainer log_history, metrics JSON, reward plots) and
 optional Hub push of LoRA weights. Every execution reward calls your live Space (or
@@ -30,7 +30,6 @@ Key stability choices:
 
 from __future__ import annotations
 
-import importlib.metadata as importlib_metadata
 import json
 import os
 import random
@@ -100,14 +99,6 @@ def bootstrap_deps() -> None:
         [
             "install",
             "--break-system-packages",
-            "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git",
-        ]
-    )
-
-    _pip(
-        [
-            "install",
-            "--break-system-packages",
             "--force-reinstall",
             "--no-deps",
             f"transformers=={_tf}",
@@ -119,7 +110,7 @@ def bootstrap_deps() -> None:
     _pip(["uninstall", "-y", "torchao"], check=False)
     _pip(["uninstall", "--break-system-packages", "-y", "torchvision", "torchaudio"], check=False)
 
-    # Do not import transformers/trl here. Unsloth must be imported first later.
+    # Keep bootstrap import-free; training imports happen below.
 
 
 bootstrap_deps()
@@ -127,74 +118,14 @@ bootstrap_deps()
 import httpx
 import torch
 from datasets import Dataset
-
-# --- CRITICAL FIXES FOR HF JOBS ---
-# 0. Unsloth checks importlib.metadata.version("vllm") at import time.
-# In text-only GRPO runs we don't install vllm, so return a dummy version instead
-# of crashing with PackageNotFoundError.
-_real_pkg_version = importlib_metadata.version
-
-
-def _safe_pkg_version(dist_name: str) -> str:
-    if dist_name == "vllm":
-        return "0.0.0"
-    return _real_pkg_version(dist_name)
-
-
-importlib_metadata.version = _safe_pkg_version
-
-# 1. Mock vllm: TRL's GRPOTrainer (v0.18+) has a buggy import path that hard-fails if vllm is missing.
-# We must provide a mock that satisfies both 'import' and 'importlib.util.find_spec'.
-import sys
-import types
-import importlib.machinery
-
-def mock_vllm_hierarchy():
-    pkg_names = [
-        "vllm",
-        "vllm.distributed",
-        "vllm.distributed.device_communicators",
-        "vllm.model_executor",
-        "vllm.model_executor.parallel_utils",
-    ]
-    leaf_names = [
-        "vllm.distributed.device_communicators.pynccl",
-    ]
-
-    # Create proper package-like modules with submodule_search_locations so
-    # unsloth's import fixes that inspect package paths don't crash.
-    for m_name in pkg_names:
-        mod = types.ModuleType(m_name)
-        mod.__package__ = m_name
-        mod.__path__ = [f"/tmp/mock_{m_name.replace('.', '_')}"]
-        spec = importlib.machinery.ModuleSpec(m_name, loader=None, is_package=True)
-        spec.submodule_search_locations = mod.__path__
-        mod.__spec__ = spec
-        sys.modules[m_name] = mod
-
-    for m_name in leaf_names:
-        mod = types.ModuleType(m_name)
-        mod.__package__ = m_name.rsplit(".", 1)[0]
-        mod.__spec__ = importlib.machinery.ModuleSpec(m_name, loader=None, is_package=False)
-        sys.modules[m_name] = mod
-
-mock_vllm_hierarchy()
-
-# Import Unsloth before transformers / trl for its patching path.
-from unsloth import FastLanguageModel
-
-# 2. Mock llm_blender: Fix for TRANSFORMERS_CACHE removal in transformers 4.40+.
-import transformers.utils.hub
-if not hasattr(transformers.utils.hub, "TRANSFORMERS_CACHE"):
-    transformers.utils.hub.TRANSFORMERS_CACHE = "/tmp"
-
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
 # --- 1. CONFIGURATION (env-first; defaults match openenv.yaml) ---
 _DEFAULT_OPENENV_BASE = "https://md896-sql-debug-env.hf.space"
 BYPASS_HEADERS: Dict[str, str] = {}
 
-MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "unsloth/Qwen2.5-Coder-7B-Instruct")
+MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
 
 
 def get_bridge_url() -> str:
@@ -410,33 +341,25 @@ def _resolve_report_to() -> str:
     return raw
 
 
-# --- 4. Unsloth GRPO training loop (live OpenEnv rewards) ---
+# --- 4. Simple GRPO training loop (live OpenEnv rewards) ---
 def run_sota_train():
     max_steps = int(os.environ.get("TRAIN_MAX_STEPS", "200"))
     out_dir = os.environ.get("OUTPUT_DIR", "./sota_results")
 
-    print(f"Starting Unsloth GRPO on {MODEL_NAME}...")
+    print(f"Starting GRPO on {MODEL_NAME}...")
     print(
         f"OpenEnv={get_bridge_url()} | max_steps={max_steps} | "
         f"rows_per_task={os.environ.get('ROWS_PER_TASK', '48')} | "
         f"report_to={_resolve_report_to()}"
     )
 
-    max_seq = int(os.environ.get("MAX_SEQ_LENGTH", "1024"))
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=MODEL_NAME,
-        max_seq_length=max_seq,
-        load_in_4bit=True,
-    )
-    
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     tokenizer.pad_token = tokenizer.eos_token
-    
-    # APPLY UNSLOTH LORA ADAPTERS
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=16,
-        lora_alpha=16,
-        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_NAME,
+        torch_dtype=torch_dtype,
+        device_map="auto",
     )
 
     train_dataset = make_real_dataset()
