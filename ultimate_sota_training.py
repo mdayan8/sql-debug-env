@@ -394,12 +394,26 @@ def run_sota_train():
     if report_to == "tensorboard":
         _ensure_dir(tb_dir)
 
+    per_device_bs = int(os.environ.get("PER_DEVICE_TRAIN_BS", "1"))
+    grad_accum = int(os.environ.get("GRAD_ACCUM", "2"))
+    requested_num_gen = int(os.environ.get("GRPO_NUM_GENERATIONS", "8"))
+    effective_bs = max(1, per_device_bs * grad_accum)
+    if effective_bs % requested_num_gen != 0:
+        valid = [d for d in range(2, effective_bs + 1) if effective_bs % d == 0]
+        num_gen = valid[-1] if valid else 2
+        print(
+            f"Adjusting GRPO_NUM_GENERATIONS from {requested_num_gen} to {num_gen} "
+            f"for effective batch size {effective_bs}."
+        )
+    else:
+        num_gen = requested_num_gen
+
     _cfg: Dict[str, Any] = dict(
         output_dir=out_dir,
         learning_rate=float(os.environ.get("TRAIN_LR", "5e-6")),
-        per_device_train_batch_size=int(os.environ.get("PER_DEVICE_TRAIN_BS", "1")),
-        gradient_accumulation_steps=int(os.environ.get("GRAD_ACCUM", "2")),
-        num_generations=int(os.environ.get("GRPO_NUM_GENERATIONS", "8")),
+        per_device_train_batch_size=per_device_bs,
+        gradient_accumulation_steps=grad_accum,
+        num_generations=num_gen,
         max_completion_length=int(os.environ.get("GRPO_MAX_COMPLETION_LEN", "256")),
         temperature=float(os.environ.get("GRPO_TEMPERATURE", "0.9")),
         num_train_epochs=int(os.environ.get("TRAIN_NUM_EPOCHS", "1")),

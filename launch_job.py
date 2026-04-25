@@ -18,7 +18,7 @@ Environment (optional):
   TRAIN_REPO_GIT_URL, OPENENV_BASE_URL
   TRAIN_MAX_STEPS      default: 80 (faster run; raise for stronger fit)
   ROWS_PER_TASK        default: 32
-  GRPO_NUM_GENERATIONS default: 6
+  GRPO_NUM_GENERATIONS default: 2
   SKIP_HUB_PUSH        default: 0
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ _REPO_URL = os.environ.get("TRAIN_REPO_GIT_URL", _DEFAULT_REPO)
 _OPENENV = os.environ.get("OPENENV_BASE_URL", "https://md896-sql-debug-env.hf.space")
 _MAX_STEPS = os.environ.get("TRAIN_MAX_STEPS", "80")
 _ROWS = os.environ.get("ROWS_PER_TASK", "32")
-_NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "6")
+_NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "2")
 _SKIP_PUSH = os.environ.get("SKIP_HUB_PUSH", "0")
 _TIMEOUT = os.environ.get("HF_JOB_TIMEOUT", "8h")
 # l4x1: newer GPU, good for Unsloth; use HF_JOB_FLAVOR=t4-small if queue or cost is better for you
