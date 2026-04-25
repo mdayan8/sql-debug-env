@@ -22,6 +22,10 @@ pinned: false
 
 **Quick links:** [Live Space](https://md896-sql-debug-env.hf.space) · [Swagger](https://md896-sql-debug-env.hf.space/docs) · [OpenAPI](https://md896-sql-debug-env.hf.space/openapi.json) · [GitHub](https://github.com/mdayan8/sql-debug-env)
 
+## Launch Blog
+
+- [From SQL Guessing to SQL Execution: Building a Real Debugging Agent](docs/SQL_DEBUG_AGENT_LAUNCH_BLOG.md)
+
 An OpenEnv environment for a real engineering workflow: SQL query debugging. Agents iterate on broken SQL using schema/error/sample inspection until they produce the expected result.
 
 ## 🏆 SQL Debug Agent: Self-Improving Database Intelligence
