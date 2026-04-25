@@ -355,11 +355,14 @@ def run_sota_train():
 
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     tokenizer.pad_token = tokenizer.eos_token
-    torch_dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    use_cuda = torch.cuda.is_available()
+    # L4/A10/A100 are typically more numerically stable with bf16 than fp16 for RL-style sampling.
+    torch_dtype = torch.bfloat16 if use_cuda else torch.float32
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch_dtype,
         device_map="auto",
+        attn_implementation=os.environ.get("ATTN_IMPLEMENTATION", "eager"),
     )
 
     train_dataset = make_real_dataset()
@@ -378,7 +381,10 @@ def run_sota_train():
                     **inputs,
                     max_new_tokens=256,
                     do_sample=True,
-                    temperature=0.7,
+                    temperature=float(os.environ.get("EVAL_TEMPERATURE", "0.7")),
+                    top_p=float(os.environ.get("EVAL_TOP_P", "0.9")),
+                    renormalize_logits=True,
+                    remove_invalid_values=True,
                     pad_token_id=tokenizer.eos_token_id,
                 )
             completions.append(tokenizer.decode(out[0], skip_special_tokens=True))
@@ -415,7 +421,15 @@ def run_sota_train():
         gradient_accumulation_steps=grad_accum,
         num_generations=num_gen,
         max_completion_length=int(os.environ.get("GRPO_MAX_COMPLETION_LEN", "256")),
-        temperature=float(os.environ.get("GRPO_TEMPERATURE", "0.9")),
+        temperature=float(os.environ.get("GRPO_TEMPERATURE", "0.7")),
+        top_p=float(os.environ.get("GRPO_TOP_P", "0.9")),
+        # Keep generation numerically safe in long sampling loops.
+        generation_kwargs={
+            "remove_invalid_values": True,
+            "renormalize_logits": True,
+        },
+        bf16=bool(use_cuda),
+        fp16=False,
         num_train_epochs=int(os.environ.get("TRAIN_NUM_EPOCHS", "1")),
         max_steps=max_steps,
         logging_steps=int(os.environ.get("LOGGING_STEPS", "1")),
