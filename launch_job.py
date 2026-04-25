@@ -18,7 +18,7 @@ Environment (optional):
   TRAIN_REPO_GIT_URL, OPENENV_BASE_URL
   TRAIN_MAX_STEPS      default: 80 (faster run; raise for stronger fit)
   ROWS_PER_TASK        default: 32
-  GRPO_NUM_GENERATIONS default: 2
+  GRPO_NUM_GENERATIONS default: 2 (TRL GRPO requires >= 2)
   SKIP_HUB_PUSH        default: 0
 """
 from __future__ import annotations
@@ -34,7 +34,7 @@ _REPO_URL = os.environ.get("TRAIN_REPO_GIT_URL", _DEFAULT_REPO)
 _OPENENV = os.environ.get("OPENENV_BASE_URL", "https://md896-sql-debug-env.hf.space")
 _MAX_STEPS = os.environ.get("TRAIN_MAX_STEPS", "900")
 _ROWS = os.environ.get("ROWS_PER_TASK", "128")
-_NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "1")
+_NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "2")
 _SKIP_PUSH = os.environ.get("SKIP_HUB_PUSH", "0")
 _TIMEOUT = os.environ.get("HF_JOB_TIMEOUT", "12h")
 _TRAIN_MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")

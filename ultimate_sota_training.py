@@ -9,6 +9,7 @@ Environment (control cost vs quality on HF Jobs / local GPU):
   OPENENV_BASE_URL          — OpenEnv HTTP root (default: Space URL from openenv.yaml)
   OPENENV_TASK_IDS          — Comma list; if unset, uses GET /tasks from the server
   ROWS_PER_TASK             — GRPO rows per task_id (default: 48)
+  GRPO_NUM_GENERATIONS      — TRL GRPO requires >= 2 (advantages); values < 2 are clamped
   OPENENV_REQUEST_TIMEOUT_SEC — HTTP timeout for reset/step (default: 120)
   TRAIN_MAX_STEPS           — GRPO steps (default 200)
   TRL_REPORT_TO             — none | wandb | tensorboard (auto: wandb if key else none)
@@ -688,19 +689,46 @@ def run_sota_train():
     if report_to == "tensorboard":
         _ensure_dir(tb_dir)
 
-    per_device_bs = int(os.environ.get("PER_DEVICE_TRAIN_BS", "1"))
-    grad_accum = int(os.environ.get("GRAD_ACCUM", "2"))
-    requested_num_gen = int(os.environ.get("GRPO_NUM_GENERATIONS", "8"))
-    effective_bs = max(1, per_device_bs * grad_accum)
-    if effective_bs % requested_num_gen != 0:
-        valid = [d for d in range(2, effective_bs + 1) if effective_bs % d == 0]
-        num_gen = valid[-1] if valid else 2
+    # TRL GRPOConfig requires num_generations >= 2 (advantages need multiple samples per prompt).
+    _MIN_GRPO_GEN = 2
+    per_device_bs = max(1, int(os.environ.get("PER_DEVICE_TRAIN_BS", "1")))
+    grad_accum = max(1, int(os.environ.get("GRAD_ACCUM", "2")))
+    raw_requested = int(os.environ.get("GRPO_NUM_GENERATIONS", "8"))
+    requested_num_gen = max(_MIN_GRPO_GEN, raw_requested)
+    if raw_requested < _MIN_GRPO_GEN:
         print(
-            f"Adjusting GRPO_NUM_GENERATIONS from {requested_num_gen} to {num_gen} "
-            f"for effective batch size {effective_bs}."
+            f"GRPO_NUM_GENERATIONS={raw_requested} is invalid for TRL GRPO (minimum {_MIN_GRPO_GEN}); "
+            f"using {requested_num_gen}.",
+            flush=True,
         )
-    else:
-        num_gen = requested_num_gen
+
+    def _valid_grpo_generations(eff_bs: int) -> List[int]:
+        return [d for d in range(_MIN_GRPO_GEN, eff_bs + 1) if eff_bs % d == 0]
+
+    while True:
+        effective_bs = per_device_bs * grad_accum
+        valid = _valid_grpo_generations(effective_bs)
+        if not valid:
+            grad_accum += 1
+            print(
+                f"GRPO: bumping GRAD_ACCUM to {grad_accum} so effective batch {per_device_bs}*{grad_accum} "
+                f"has a divisor in [{_MIN_GRPO_GEN}, batch] for num_generations.",
+                flush=True,
+            )
+            continue
+        if requested_num_gen in valid:
+            num_gen = requested_num_gen
+        else:
+            # Prefer smallest valid value to reduce VRAM vs. many parallel completions.
+            num_gen = min(d for d in valid if d >= requested_num_gen) if any(
+                d >= requested_num_gen for d in valid
+            ) else min(valid)
+            print(
+                f"Adjusting GRPO_NUM_GENERATIONS to {num_gen} for effective batch size {effective_bs} "
+                f"(must divide batch; TRL minimum {_MIN_GRPO_GEN}).",
+                flush=True,
+            )
+        break
 
     _cfg: Dict[str, Any] = dict(
         output_dir=out_dir,
