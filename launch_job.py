@@ -12,7 +12,7 @@ the container as env HF_TOKEN (Settings → Access Tokens / Job secrets).
 
 Environment (optional):
   HF_JOB_NAMESPACE     default: whoami
-  HF_JOB_FLAVOR        default: l4x1 (often faster than T4 for this workload; override with t4-small to save $)
+  HF_JOB_FLAVOR        default: h200 for 7B GRPO (VRAM headroom); l4x1 for smaller models; override anytime
   HF_JOB_IMAGE         default: pytorch CUDA 12.4 devel
   HF_JOB_TIMEOUT       default: 8h
   TRAIN_REPO_GIT_URL, OPENENV_BASE_URL
@@ -36,10 +36,10 @@ _MAX_STEPS = os.environ.get("TRAIN_MAX_STEPS", "900")
 _ROWS = os.environ.get("ROWS_PER_TASK", "128")
 _NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "1")
 _SKIP_PUSH = os.environ.get("SKIP_HUB_PUSH", "0")
-_TIMEOUT = os.environ.get("HF_JOB_TIMEOUT", "8h")
+_TIMEOUT = os.environ.get("HF_JOB_TIMEOUT", "12h")
 _TRAIN_MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
-# 7B + GRPO creates a reference copy; 24GB cards (L4/A10G) can OOM.
-_DEFAULT_FLAVOR = "a100-large" if "7b" in _TRAIN_MODEL_NAME.lower() else "l4x1"
+# 7B + GRPO needs headroom (reference model, generations). H200 queues but runs reliably.
+_DEFAULT_FLAVOR = "h200" if "7b" in _TRAIN_MODEL_NAME.lower() else "l4x1"
 _FLAVOR = os.environ.get("HF_JOB_FLAVOR", _DEFAULT_FLAVOR)
 _IMAGE = os.environ.get(
     "HF_JOB_IMAGE",
@@ -80,7 +80,10 @@ _job_env = {
     "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"),
     "TASK_EVAL_SAMPLES": os.environ.get("TASK_EVAL_SAMPLES", "16"),
     "ARTIFACT_SPACE_ID": os.environ.get("ARTIFACT_SPACE_ID", "md896/sql-debug-env"),
-    "MODEL_HUB_REPO_ID": os.environ.get("MODEL_HUB_REPO_ID", "md896/sql-debug-agent-qwen05b-grpo"),
+    "MODEL_HUB_REPO_ID": os.environ.get(
+        "MODEL_HUB_REPO_ID",
+        "md896/sql-debug-agent-qwen25-7b-grpo-long" if "7b" in _TRAIN_MODEL_NAME.lower() else "md896/sql-debug-agent-qwen05b-grpo",
+    ),
     "HARD_EVAL_SAMPLES": os.environ.get("HARD_EVAL_SAMPLES", "16"),
 }
 
@@ -100,6 +103,6 @@ if __name__ == "__main__":
     print("JOB_URL:", job.url)
     print("FLAVOR:", _FLAVOR, "| TRAIN_MAX_STEPS:", _MAX_STEPS, "| ROWS_PER_TASK:", _ROWS, "| TRAIN_MODEL_NAME:", _TRAIN_MODEL_NAME)
     print(
-        "Note: SCHEDULING is Hugging Face queue time, not your script. "
-        "Cancel stuck jobs and retry, or try HF_JOB_FLAVOR=t4-small / t4-medium."
+        "Note: SCHEDULING = HF queue until a GPU is assigned; 'No logs' is normal until RUNNING. "
+        "For 7B GRPO default flavor is h200 (top VRAM). Override HF_JOB_FLAVOR if queue is too long."
     )
