@@ -317,6 +317,22 @@ class ArtifactPaths:
     def reward_curve_png(self) -> Path:
         return self.root / "reward_curve.png"
 
+    @property
+    def reward_curve_moving_avg_png(self) -> Path:
+        return self.root / "reward_curve_moving_avg.png"
+
+    @property
+    def training_diagnostics_png(self) -> Path:
+        return self.root / "training_diagnostics.png"
+
+    @property
+    def task_delta_png(self) -> Path:
+        return self.root / "task_delta.png"
+
+    @property
+    def train_series_json(self) -> Path:
+        return self.root / "train_series.json"
+
 
 def _ensure_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -408,6 +424,94 @@ def plot_reward_curve(reward_series: List[tuple[float, float]], paths: ArtifactP
     print(f"Saved {paths.reward_curve_png}")
 
 
+def extract_numeric_series(log_history: List[Dict[str, Any]], key_contains: str) -> List[tuple[float, float]]:
+    series: List[tuple[float, float]] = []
+    needle = key_contains.lower()
+    for row in log_history:
+        step = row.get("step") or row.get("global_step") or row.get("epoch")
+        if step is None:
+            continue
+        for k, v in row.items():
+            if needle in str(k).lower() and isinstance(v, (int, float)):
+                series.append((float(step), float(v)))
+                break
+    # de-dup by step preserving order
+    seen = set()
+    out: List[tuple[float, float]] = []
+    for s, v in series:
+        if s in seen:
+            continue
+        seen.add(s)
+        out.append((s, v))
+    return out
+
+
+def _moving_average(values: List[float], window: int) -> List[float]:
+    if not values:
+        return []
+    w = max(1, window)
+    out: List[float] = []
+    run = 0.0
+    for i, val in enumerate(values):
+        run += val
+        if i >= w:
+            run -= values[i - w]
+        out.append(run / min(i + 1, w))
+    return out
+
+
+def plot_reward_moving_average(reward_series: List[tuple[float, float]], paths: ArtifactPaths) -> None:
+    if not reward_series:
+        return
+    import matplotlib.pyplot as plt
+
+    xs = [s for s, _ in reward_series]
+    ys = [v for _, v in reward_series]
+    ys_ma = _moving_average(ys, window=max(5, len(ys) // 20 or 5))
+    plt.figure(figsize=(9, 4))
+    plt.plot(xs, ys, alpha=0.25, linewidth=1, label="raw reward")
+    plt.plot(xs, ys_ma, linewidth=2, label="moving average")
+    plt.title("Reward Curve (raw + moving average)")
+    plt.xlabel("step")
+    plt.ylabel("reward")
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(paths.reward_curve_moving_avg_png, dpi=200)
+    print(f"Saved {paths.reward_curve_moving_avg_png}")
+
+
+def plot_training_diagnostics(
+    reward_series: List[tuple[float, float]],
+    loss_series: List[tuple[float, float]],
+    paths: ArtifactPaths,
+) -> None:
+    if not reward_series and not loss_series:
+        return
+    import matplotlib.pyplot as plt
+
+    fig, ax1 = plt.subplots(figsize=(10, 4.5))
+    if reward_series:
+        rx = [s for s, _ in reward_series]
+        ry = [v for _, v in reward_series]
+        ax1.plot(rx, ry, color="#2563eb", label="reward")
+        ax1.set_ylabel("reward", color="#2563eb")
+    ax1.set_xlabel("step")
+    ax1.grid(True, linestyle="--", alpha=0.3)
+
+    if loss_series:
+        ax2 = ax1.twinx()
+        lx = [s for s, _ in loss_series]
+        ly = [v for _, v in loss_series]
+        ax2.plot(lx, ly, color="#ef4444", label="loss")
+        ax2.set_ylabel("loss", color="#ef4444")
+
+    fig.suptitle("Training Diagnostics: Reward and Loss")
+    fig.tight_layout()
+    fig.savefig(paths.training_diagnostics_png, dpi=200)
+    print(f"Saved {paths.training_diagnostics_png}")
+
+
 def plot_performance_comparison(
     before_by_task: Dict[str, float],
     after_by_task: Dict[str, float],
@@ -438,6 +542,26 @@ def plot_performance_comparison(
     plt.ylabel("avg reward")
     plt.title("Performance Comparison by Task (OpenEnv reward)")
     plt.legend()
+    plt.grid(axis="y", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    print(f"Saved {out_path}")
+
+
+def plot_task_delta(before_by_task: Dict[str, float], after_by_task: Dict[str, float], out_path: Path) -> None:
+    import matplotlib.pyplot as plt
+
+    task_ids = sorted(set(before_by_task) | set(after_by_task))
+    if not task_ids:
+        return
+    deltas = [after_by_task.get(t, 0.0) - before_by_task.get(t, 0.0) for t in task_ids]
+    colors = ["#16a34a" if d >= 0 else "#dc2626" for d in deltas]
+    plt.figure(figsize=(9, 4.5))
+    plt.bar(task_ids, deltas, color=colors)
+    plt.axhline(0.0, color="#111827", linewidth=1)
+    plt.xticks(rotation=15, ha="right")
+    plt.ylabel("reward delta (post - base)")
+    plt.title("Per-task Improvement Delta")
     plt.grid(axis="y", linestyle="--", alpha=0.3)
     plt.tight_layout()
     plt.savefig(out_path, dpi=200)
@@ -616,6 +740,9 @@ def run_sota_train():
     )
     metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
     plot_reward_curve(reward_series, artifacts)
+    plot_reward_moving_average(reward_series, artifacts)
+    loss_series = extract_numeric_series(log_history, "loss")
+    plot_training_diagnostics(reward_series, loss_series, artifacts)
     try:
         import matplotlib.pyplot as plt
 
@@ -634,6 +761,7 @@ def run_sota_train():
         print(f"Could not generate before/after plot: {e}")
     try:
         plot_performance_comparison(before_by_task, after_by_task, artifacts.root / "performance_comparison.png")
+        plot_task_delta(before_by_task, after_by_task, artifacts.task_delta_png)
         plot_reward_distribution_shift(
             before_samples_all,
             after_samples_all,
@@ -661,6 +789,23 @@ def run_sota_train():
     # Upload run artifacts back to the Space repo so you can download/view them.
     artifact_space = os.environ.get("ARTIFACT_SPACE_ID", "md896/sql-debug-env")
     run_tag = time.strftime("%Y%m%d-%H%M%S")
+    try:
+        artifacts.train_series_json.write_text(
+            json.dumps(
+                {
+                    "reward_series": reward_series,
+                    "loss_series": loss_series,
+                    "before_samples": before_samples_all,
+                    "after_samples": after_samples_all,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        print(f"Saved {artifacts.train_series_json}")
+    except Exception as e:
+        print(f"Could not save train series json: {e}")
+
     try:
         if token:
             api = HfApi(token=token)
