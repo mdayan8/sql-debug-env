@@ -69,6 +69,7 @@ def bootstrap_deps() -> None:
             "trl>=0.18.2,<0.24.0",
             "mergekit",
             "llm-blender",
+            "vllm",
             "weave",
             "wandb",
             "matplotlib",
