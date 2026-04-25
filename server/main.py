@@ -6,10 +6,11 @@ Also includes: GET /tasks (list available tasks), GET /health
 import asyncio
 import time
 import statistics
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Any
 from contextlib import asynccontextmanager
+import sqlite3
 
-from fastapi import FastAPI, HTTPException, Header
+from fastapi import FastAPI, HTTPException, Header, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -223,6 +224,90 @@ async def step(
         "done": done,
         "info": info
     }
+
+
+@app.post("/step_with_review")
+async def step_with_review(
+    request: StepRequest,
+    x_session_id: Optional[str] = Header(default=None)
+):
+    """
+    Execute a step with a Reviewer Agent layer.
+    If the action is a query submission, the Reviewer validates it first.
+    """
+    session_id = x_session_id or "default"
+    if session_id not in _sessions:
+        raise HTTPException(status_code=400, detail="Session not found. Call /reset first.")
+    
+    env = _sessions[session_id]
+    action = request.action
+
+    if action.action_type == "submit_query" and action.query:
+        # Reviewer checks the query before execution
+        state = env.get_state()
+        review = reviewer_check(action.query, state.db_schema or {})
+        
+        if not review["approved"]:
+            # Reviewer rejected — return feedback without executing
+            # Penalize slightly for bad submission attempt
+            reward = -0.02
+            # Return current observation but add reviewer feedback
+            obs = state.to_observation()
+            obs.error_details = f"REVIEWER REJECTION: {review['reason']}"
+            
+            return {
+                "observation": obs.model_dump(),
+                "reward": reward,
+                "done": False,
+                "info": {"review_rejected": True, "reason": review["reason"]}
+            }
+
+    # If approved or not a query, proceed to normal step
+    try:
+        observation, reward, done, info = await env.step(action)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "observation": observation.model_dump(),
+        "reward": reward,
+        "done": done,
+        "info": info
+    }
+
+
+def reviewer_check(query: str, schema: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Simple rule-based Reviewer Agent.
+    Checks:
+    1. Table existence
+    2. Read-only (SELECT/WITH)
+    3. Basic SQLite syntax (EXPLAIN)
+    """
+    query_upper = query.upper().strip()
+    
+    # Check 1: Is it a read query?
+    if not (query_upper.startswith("SELECT") or query_upper.startswith("WITH")):
+        return {"approved": False, "reason": "Only SELECT queries or CTEs (WITH) are allowed."}
+
+    # Check 2: Does it reference valid tables?
+    tables = list(schema.keys())
+    referenced = [t for t in tables if t.upper() in query_upper]
+    if not referenced and tables:
+        return {"approved": False, "reason": f"Query does not reference any valid tables. Available: {tables}"}
+
+    # Check 3: Syntax check via EXPLAIN
+    try:
+        conn = sqlite3.connect(":memory:")
+        # We don't have the actual data here, but EXPLAIN works on syntax
+        conn.execute(f"EXPLAIN {query}")
+        conn.close()
+    except sqlite3.OperationalError as e:
+        return {"approved": False, "reason": f"Syntax error caught by Reviewer: {e}"}
+    except Exception as e:
+        return {"approved": False, "reason": f"Reviewer error: {e}"}
+
+    return {"approved": True, "reason": "Query approved"}
 
 
 @app.get("/state")

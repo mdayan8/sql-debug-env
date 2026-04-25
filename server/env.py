@@ -14,12 +14,13 @@ from .reward import compute_reward
 from .tasks.task_easy import EasyTask
 from .tasks.task_medium import MediumTask, MediumTaskGrader
 from .tasks.task_hard import HardTask
-
+from .tasks.task_finance_explosion import FinanceExplosionTask
 
 TASKS = {
     "easy_syntax_fix": EasyTask(),
     "medium_logic_fix": MediumTask(),
     "hard_multi_bug": HardTask(),
+    "hard_finance_explosion": FinanceExplosionTask(),
 }
 STRICT_MIN_SCORE = 0.001
 

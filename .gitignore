@@ -4,6 +4,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .DS_Store
+.graphify/
 
 # local env / secrets
 .env
@@ -16,4 +17,3 @@ __pycache__/
 
 # editor metadata
 .cursor/
-
