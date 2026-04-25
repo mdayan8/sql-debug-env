@@ -119,16 +119,7 @@ def bootstrap_deps() -> None:
     _pip(["uninstall", "-y", "torchao"], check=False)
     _pip(["uninstall", "--break-system-packages", "-y", "torchvision", "torchaudio"], check=False)
 
-    try:
-        import accelerate  # noqa: F401
-        import transformers  # noqa: F401
-        from trl import GRPOConfig as _BootstrapGRPOConfig  # noqa: F401
-
-        _ = _BootstrapGRPOConfig
-    except Exception as e:
-        raise RuntimeError(
-            "Post-bootstrap import check failed. Adjust BOOTSTRAP_*_VERSION or SKIP_BOOTSTRAP=1."
-        ) from e
+    # Do not import transformers/trl here. Unsloth must be imported first later.
 
 
 bootstrap_deps()
@@ -157,21 +148,35 @@ importlib_metadata.version = _safe_pkg_version
 import sys
 import types
 import importlib.machinery
-from unittest.mock import MagicMock
 
 def mock_vllm_hierarchy():
-    for m_name in [
-        "vllm", 
-        "vllm.distributed", 
-        "vllm.distributed.device_communicators", 
-        "vllm.distributed.device_communicators.pynccl",
+    pkg_names = [
+        "vllm",
+        "vllm.distributed",
+        "vllm.distributed.device_communicators",
         "vllm.model_executor",
         "vllm.model_executor.parallel_utils",
-    ]:
-        mock_m = MagicMock(spec=types.ModuleType)
-        mock_m.__name__ = m_name
-        mock_m.__spec__ = importlib.machinery.ModuleSpec(m_name, None)
-        sys.modules[m_name] = mock_m
+    ]
+    leaf_names = [
+        "vllm.distributed.device_communicators.pynccl",
+    ]
+
+    # Create proper package-like modules with submodule_search_locations so
+    # unsloth's import fixes that inspect package paths don't crash.
+    for m_name in pkg_names:
+        mod = types.ModuleType(m_name)
+        mod.__package__ = m_name
+        mod.__path__ = [f"/tmp/mock_{m_name.replace('.', '_')}"]
+        spec = importlib.machinery.ModuleSpec(m_name, loader=None, is_package=True)
+        spec.submodule_search_locations = mod.__path__
+        mod.__spec__ = spec
+        sys.modules[m_name] = mod
+
+    for m_name in leaf_names:
+        mod = types.ModuleType(m_name)
+        mod.__package__ = m_name.rsplit(".", 1)[0]
+        mod.__spec__ = importlib.machinery.ModuleSpec(m_name, loader=None, is_package=False)
+        sys.modules[m_name] = mod
 
 mock_vllm_hierarchy()
 
