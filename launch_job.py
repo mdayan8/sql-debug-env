@@ -43,7 +43,7 @@ _IMAGE = os.environ.get(
     "HF_JOB_IMAGE",
     "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
 )
-_NAMESPACE = os.environ.get("HF_JOB_NAMESPACE")
+_NAMESPACE = os.environ.get("HF_JOB_NAMESPACE", "md896")
 
 _SECRETS = None
 _local_hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or get_token()
@@ -78,7 +78,7 @@ _job_env = {
 
 if __name__ == "__main__":
     api = HfApi()
-    ns = _NAMESPACE or api.whoami()["name"]
+    ns = _NAMESPACE
     job = api.run_job(
         image=_IMAGE,
         command=["bash", "-lc", _bash],
