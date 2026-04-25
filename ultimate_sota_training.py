@@ -95,6 +95,14 @@ bootstrap_deps()
 import httpx
 import torch
 from datasets import Dataset
+
+# CRITICAL FIX for llm_blender crash:
+# llm_blender unconditionally tries to import TRANSFORMERS_CACHE which was removed from transformers 4.40+.
+# Since we don't even use llm_blender, we just mock it here so TRL doesn't crash on import.
+import transformers.utils.hub
+if not hasattr(transformers.utils.hub, "TRANSFORMERS_CACHE"):
+    transformers.utils.hub.TRANSFORMERS_CACHE = "/tmp"
+
 from trl import GRPOConfig, GRPOTrainer
 from unsloth import FastLanguageModel
 
