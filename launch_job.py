@@ -14,7 +14,7 @@ Environment (optional):
   HF_JOB_NAMESPACE     default: whoami
   HF_JOB_FLAVOR        default: h200 for 7B GRPO (VRAM headroom); l4x1 for smaller models; override anytime
   HF_JOB_IMAGE         default: pytorch CUDA 12.4 devel
-  HF_JOB_TIMEOUT       default: 8h
+  HF_JOB_TIMEOUT       default: 12h
   TRAIN_REPO_GIT_URL, OPENENV_BASE_URL
   TRAIN_MAX_STEPS      default: 80 (faster run; raise for stronger fit)
   ROWS_PER_TASK        default: 32
