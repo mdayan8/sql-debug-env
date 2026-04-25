@@ -599,6 +599,8 @@ def _resolve_report_to() -> str:
 
 # --- 4. Simple GRPO training loop (live OpenEnv rewards) ---
 def run_sota_train():
+    # Helps with CUDA memory fragmentation in long generation/training loops.
+    os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
     max_steps = int(os.environ.get("TRAIN_MAX_STEPS", "240"))
     out_dir = os.environ.get("OUTPUT_DIR", "./sota_results")
 
@@ -671,11 +673,13 @@ def run_sota_train():
         per_device_train_batch_size=per_device_bs,
         gradient_accumulation_steps=grad_accum,
         num_generations=num_gen,
-        max_completion_length=int(os.environ.get("GRPO_MAX_COMPLETION_LEN", "256")),
+        max_prompt_length=int(os.environ.get("GRPO_MAX_PROMPT_LEN", "384")),
+        max_completion_length=int(os.environ.get("GRPO_MAX_COMPLETION_LEN", "128")),
         temperature=float(os.environ.get("GRPO_TEMPERATURE", "0.7")),
         top_p=float(os.environ.get("GRPO_TOP_P", "0.9")),
         bf16=bool(use_cuda),
         fp16=False,
+        gradient_checkpointing=True,
         num_train_epochs=int(os.environ.get("TRAIN_NUM_EPOCHS", "1")),
         max_steps=max_steps,
         logging_steps=int(os.environ.get("LOGGING_STEPS", "1")),

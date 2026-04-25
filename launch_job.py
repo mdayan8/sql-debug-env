@@ -34,7 +34,7 @@ _REPO_URL = os.environ.get("TRAIN_REPO_GIT_URL", _DEFAULT_REPO)
 _OPENENV = os.environ.get("OPENENV_BASE_URL", "https://md896-sql-debug-env.hf.space")
 _MAX_STEPS = os.environ.get("TRAIN_MAX_STEPS", "900")
 _ROWS = os.environ.get("ROWS_PER_TASK", "128")
-_NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "2")
+_NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "1")
 _SKIP_PUSH = os.environ.get("SKIP_HUB_PUSH", "0")
 _TIMEOUT = os.environ.get("HF_JOB_TIMEOUT", "8h")
 _TRAIN_MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
@@ -75,6 +75,9 @@ _job_env = {
     "SKIP_HUB_PUSH": _SKIP_PUSH,
     "TRAIN_MODEL_NAME": _TRAIN_MODEL_NAME,
     "TRAIN_LR": os.environ.get("TRAIN_LR", "3e-6"),
+    "GRPO_MAX_PROMPT_LEN": os.environ.get("GRPO_MAX_PROMPT_LEN", "384"),
+    "GRPO_MAX_COMPLETION_LEN": os.environ.get("GRPO_MAX_COMPLETION_LEN", "128"),
+    "PYTORCH_CUDA_ALLOC_CONF": os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True"),
     "TASK_EVAL_SAMPLES": os.environ.get("TASK_EVAL_SAMPLES", "16"),
     "ARTIFACT_SPACE_ID": os.environ.get("ARTIFACT_SPACE_ID", "md896/sql-debug-env"),
     "MODEL_HUB_REPO_ID": os.environ.get("MODEL_HUB_REPO_ID", "md896/sql-debug-agent-qwen05b-grpo"),
