@@ -36,6 +36,12 @@ tasks:
     max_steps: 30
     description: "Fix 5 bugs: correlated subquery, window function, duplicate rows, date logic, CTE scope"
 
+  - id: hard_finance_explosion
+    name: "Financial Cartesian Explosion Fix"
+    difficulty: expert
+    max_steps: 12
+    description: "Fix fan-trap (cartesian explosion) revenue multiplication via pre-aggregation"
+
 api:
   base_url: "https://md896-sql-debug-env.hf.space"
   reset: "/reset"
@@ -101,4 +107,3 @@ runtime:
   machine_requirements:
     vcpu: 2
     memory_gb: 8
-

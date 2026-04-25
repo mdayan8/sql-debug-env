@@ -24,6 +24,22 @@ pinned: false
 
 An OpenEnv environment for a real engineering workflow: SQL query debugging. Agents iterate on broken SQL using schema/error/sample inspection until they produce the expected result.
 
+## 🏆 SQL Debug Agent: Self-Improving Database Intelligence
+
+## 🚀 The Problem (Motivation)
+SQL errors are the **"Hidden Tax"** of software development. Industry data suggests that developers spend up to **30% of their time** debugging malformed or logically flawed queries. 
+*   **Static Linters** only catch syntax, not logic.
+*   **LLMs** hallucinate schemas they haven't seen.
+*   **Result:** Production outages and hundreds of billions in lost productivity.
+
+Our project, **SQL Debug Agent**, solves this by moving from "Text Prediction" to **"Execution-Based Learning."**
+
+## 🧠 The Innovation: RL-Enhanced Debugging
+Instead of just guessing the next token, our agent was trained in a **live SQL sandbox** using **GRPO (Group Relative Policy Optimization).**
+*   **Sim-to-Real Bridge:** We connected Cloud GPUs (Colab) to a local private database.
+*   **Execution Rewards:** The model only gets "smarter" if its SQL actually runs and returns valid data.
+*   **Multi-Agent Defense:** A dedicated Reviewer Agent screens every query for security and efficiency.
+
 ## Abstract
 This project implements a deterministic OpenEnv benchmark for SQL debugging. It includes three graded tasks (easy -> medium -> hard), typed action/observation/reward models, dense reward shaping, reproducible behavior, Docker deployment, and a baseline inference runner with strict structured logs.
 
@@ -89,6 +105,7 @@ Reward is clamped to `[0.0, 1.0]` and combines:
 - Easy: `easy_syntax_fix`
 - Medium: `medium_logic_fix`
 - Hard: `hard_multi_bug`
+- Expert: `hard_finance_explosion` (fan-trap / cartesian explosion)
 
 ## Repository Structure
 ```text
@@ -112,7 +129,8 @@ sql-debug-env/
 │       ├── base.py
 │       ├── task_easy.py
 │       ├── task_medium.py
-│       └── task_hard.py
+│       ├── task_hard.py
+│       └── task_finance_explosion.py
 └── tests/
     ├── test_env.py
     ├── test_graders.py

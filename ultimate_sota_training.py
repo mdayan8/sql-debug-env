@@ -1,17 +1,85 @@
-# 🏆 THE ULTIMATE UNSLOTH + OPENENV TRAINING
-# Powered by Hugging Face A10G/T4
+"""
+🏆 Unsloth + OpenEnv GRPO training script
 
+Goal: produce *real* training evidence (reward curves + logs) and optionally push LoRA
+weights to the Hub.
+
+This script is designed to run inside Hugging Face Jobs/Spaces containers where:
+- system Python may be externally managed (PEP-668) → uses --break-system-packages
+- preinstalled CUDA/PyTorch stacks can conflict with optional vision packages
+
+Key stability choices:
+- Avoid importing torchvision in text-only runs (it can break when torch/torchvision
+  versions are mismatched by dependency resolution).
+- Produce plots and metrics from the *actual* GRPO run (no hard-coded scores).
+"""
+
+from __future__ import annotations
+
+import json
 import os
-print("📦 Installing State-of-the-Art Libraries (Unsloth & TRL)...")
-os.system('pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" --break-system-packages')
-# Removed the pip install -U line as Unsloth installs the correct versions of trl, accelerate, peft automatically
-# Installing torchao separately since torch 2.5 has missing torch.int1 attribute in some versions of torchao. Actually unsloth handles torchao.
-os.system("pip install wandb matplotlib --break-system-packages")
+import random
+import re
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+
+def _run(cmd: List[str], *, check: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, check=check)
+
+
+def _pip(args: List[str], *, check: bool = True) -> subprocess.CompletedProcess:
+    return _run([sys.executable, "-m", "pip", *args], check=check)
+
+
+def bootstrap_deps() -> None:
+    """
+    Best-effort dependency bootstrap for ephemeral HF containers.
+
+    Set SKIP_BOOTSTRAP=1 to disable.
+    """
+    if os.environ.get("SKIP_BOOTSTRAP") == "1":
+        return
+
+    print("📦 Bootstrapping dependencies...")
+
+    # Text-only run: torchvision/torchaudio are not required and are a common source
+    # of crashes when torch versions shift in container images.
+    _pip(["uninstall", "-y", "torchvision", "torchaudio"], check=False)
+
+    # Keep these scoped; avoid blanket -U to reduce resolver churn.
+    _pip(
+        [
+            "install",
+            "--break-system-packages",
+            "httpx>=0.27.0",
+            "datasets>=3.4.1,<4.4.0",
+            "trl>=0.18.2,<=0.24.0",
+            "wandb",
+            "matplotlib",
+        ]
+    )
+
+    # Unsloth (and its dependency set) can be fast-moving; install from git.
+    # Build isolation/resolution can sometimes change torch; removing torchvision
+    # above keeps transformers imports stable for text-only workloads.
+    _pip(
+        [
+            "install",
+            "--break-system-packages",
+            "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git",
+        ]
+    )
+
+
+bootstrap_deps()
 
 import httpx
 import torch
-import random
-import re
 from datasets import Dataset
 from trl import GRPOConfig, GRPOTrainer
 from unsloth import FastLanguageModel
@@ -110,6 +178,115 @@ def execution_reward_func(completions, task_id, **kwargs):
             rewards.append(reward)
     return rewards
 
+# --- 3b. ARTIFACTS / PLOTS (REAL, FROM LOGS) ---
+
+@dataclass(frozen=True)
+class ArtifactPaths:
+    root: Path
+
+    @property
+    def logs_jsonl(self) -> Path:
+        return self.root / "train_log_history.jsonl"
+
+    @property
+    def metrics_json(self) -> Path:
+        return self.root / "train_metrics.json"
+
+    @property
+    def reward_curve_png(self) -> Path:
+        return self.root / "reward_curve.png"
+
+
+def _ensure_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def save_log_history(log_history: List[Dict[str, Any]], paths: ArtifactPaths) -> None:
+    _ensure_dir(paths.root)
+    with paths.logs_jsonl.open("w", encoding="utf-8") as f:
+        for row in log_history:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def extract_reward_series(log_history: List[Dict[str, Any]]) -> List[tuple[float, float]]:
+    """
+    Returns [(step, reward_like_value)] extracted from trainer log_history.
+    TRL log keys vary; this is resilient and will pick the most relevant.
+    """
+    candidates = [
+        "reward",
+        "rewards/mean",
+        "rewards",
+        "train/reward",
+        "train/rewards",
+        "objective/mean_reward",
+        "mean_reward",
+    ]
+
+    series: List[tuple[float, float]] = []
+    for row in log_history:
+        step = row.get("step") or row.get("global_step") or row.get("epoch")
+        if step is None:
+            continue
+        value = None
+        for key in candidates:
+            if key in row and isinstance(row[key], (int, float)):
+                value = float(row[key])
+                break
+        if value is None:
+            # fallback: pick any numeric key containing "reward"
+            for k, v in row.items():
+                if "reward" in str(k).lower() and isinstance(v, (int, float)):
+                    value = float(v)
+                    break
+        if value is None:
+            continue
+        series.append((float(step), value))
+
+    # de-dup by step while preserving order
+    seen = set()
+    deduped: List[tuple[float, float]] = []
+    for s, v in series:
+        if s in seen:
+            continue
+        seen.add(s)
+        deduped.append((s, v))
+    return deduped
+
+
+def write_metrics(log_history: List[Dict[str, Any]], reward_series: List[tuple[float, float]], paths: ArtifactPaths) -> None:
+    metrics = {
+        "generated_at_epoch_s": time.time(),
+        "log_rows": len(log_history),
+        "reward_points": len(reward_series),
+        "reward_first": reward_series[0][1] if reward_series else None,
+        "reward_last": reward_series[-1][1] if reward_series else None,
+        "reward_max": max((v for _, v in reward_series), default=None),
+    }
+    _ensure_dir(paths.root)
+    paths.metrics_json.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+
+
+def plot_reward_curve(reward_series: List[tuple[float, float]], paths: ArtifactPaths) -> None:
+    if not reward_series:
+        print("⚠️ No reward series found in log history; skipping plot.")
+        return
+    import matplotlib.pyplot as plt
+
+    xs = [s for s, _ in reward_series]
+    ys = [v for _, v in reward_series]
+    plt.figure(figsize=(9, 4))
+    plt.plot(xs, ys, linewidth=2)
+    plt.title("GRPO Reward Over Time (from run logs)")
+    plt.xlabel("step")
+    plt.ylabel("reward (extracted)")
+    plt.grid(True, linestyle="--", alpha=0.4)
+    _ensure_dir(paths.root)
+    plt.tight_layout()
+    plt.savefig(paths.reward_curve_png, dpi=200)
+    print(f"✅ Saved {paths.reward_curve_png}")
+
+
 # --- 4. THE UNSLOTH + DEEPSEEK-R1 TRAINING LOOP ---
 def run_sota_train():
     print(f"🚀 Starting Unsloth GRPO on {MODEL_NAME}...")
@@ -131,6 +308,38 @@ def run_sota_train():
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
     )
 
+    train_dataset = make_real_dataset()
+
+    def quick_exec_eval(max_items: int = 8) -> float:
+        """
+        Quick before/after check:
+        - sample a few prompts
+        - generate <think>/<sql>
+        - score via live execution reward
+        """
+        subset = train_dataset.select(range(min(max_items, len(train_dataset))))
+        prompts = subset["prompt"]
+        task_ids = subset["task_id"]
+
+        completions: List[str] = []
+        for prompt in prompts:
+            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+            with torch.no_grad():
+                out = model.generate(
+                    **inputs,
+                    max_new_tokens=256,
+                    do_sample=True,
+                    temperature=0.7,
+                    pad_token_id=tokenizer.eos_token_id,
+                )
+            completions.append(tokenizer.decode(out[0], skip_special_tokens=True))
+
+        rewards = execution_reward_func(completions, task_ids)
+        return float(sum(rewards) / max(len(rewards), 1))
+
+    print("📏 Quick baseline eval (pre-train)...")
+    baseline_avg_reward = quick_exec_eval()
+
     training_args = GRPOConfig(
         output_dir="./sota_results",
         learning_rate=5e-6, 
@@ -149,14 +358,55 @@ def run_sota_train():
         model=model,
         reward_funcs=[format_reward_func, syntax_reward_func, execution_reward_func],
         args=training_args,
-        train_dataset=make_real_dataset(),
+        train_dataset=train_dataset,
         processing_class=tokenizer,
     )
 
     print("🧠 SOTA Sandbox Active. Let the RL begin...")
     trainer.train()
 
-    print("\n💾 Saving and Pushing SOTA Model to Hugging Face...")
+    print("📏 Quick eval (post-train)...")
+    post_avg_reward = quick_exec_eval()
+
+    # --- Save artifacts (real logs/plots) ---
+    artifacts = ArtifactPaths(root=Path("./sota_results/artifacts"))
+    log_history = getattr(trainer.state, "log_history", []) or []
+    save_log_history(log_history, artifacts)
+    reward_series = extract_reward_series(log_history)
+    write_metrics(log_history, reward_series, artifacts)
+    # augment metrics with before/after
+    metrics_path = artifacts.metrics_json
+    try:
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    except Exception:
+        metrics = {}
+    metrics.update(
+        {
+            "baseline_avg_reward": baseline_avg_reward,
+            "post_avg_reward": post_avg_reward,
+            "delta_avg_reward": post_avg_reward - baseline_avg_reward,
+        }
+    )
+    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+    plot_reward_curve(reward_series, artifacts)
+    try:
+        import matplotlib.pyplot as plt
+
+        labels = ["baseline", "post-train"]
+        values = [baseline_avg_reward, post_avg_reward]
+        plt.figure(figsize=(5, 4))
+        plt.bar(labels, values, color=["#94a3b8", "#22c55e"])
+        plt.ylim(0, max(1.0, max(values) * 1.1))
+        plt.title("Avg execution reward (sampled)")
+        plt.ylabel("avg reward")
+        out_path = artifacts.root / "before_after_avg_reward.png"
+        plt.tight_layout()
+        plt.savefig(out_path, dpi=200)
+        print(f"✅ Saved {out_path}")
+    except Exception as e:
+        print(f"⚠️ Could not generate before/after plot: {e}")
+
+    print("\n💾 Saving and (optionally) pushing LoRA weights...")
     model.save_pretrained("./sota_sql_agent_unsloth")
     
     # CRITICAL: Since you are running on HF Jobs, the server deletes everything when it finishes.
@@ -167,48 +417,7 @@ def run_sota_train():
     except Exception as e:
         print(f"⚠️ Could not push to hub. Make sure HF_TOKEN is set. Error: {e}")
 
-    print("\n📊 Generating SOTA Visuals...")
-    generate_sota_visuals()
-
-def generate_sota_visuals():
-    import matplotlib.pyplot as plt
-    import numpy as np
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # --- Chart 1: The Multi-Reward Curve ---
-    steps = np.arange(1, 31)
-    format_r = np.clip(np.log(steps) * 0.05, 0, 0.1) 
-    syntax_r = np.clip(np.log(steps) * 0.08, 0, 0.2) 
-    exec_r = np.clip(np.exp((steps - 15) * 0.3) * 0.05, 0, 1.0) 
-    
-    ax1.plot(steps, format_r, label='Format Reward (XML Tags)', color='gray', linestyle='--')
-    ax1.plot(steps, syntax_r, label='Syntax Reward (Valid SQL)', color='orange', linestyle='--')
-    ax1.plot(steps, exec_r, label='Execution Reward (OpenEnv)', color='green', linewidth=3)
-    ax1.fill_between(steps, 0, exec_r, color='green', alpha=0.1)
-    ax1.set_title('DeepSeek-R1 Reward Convergence (Unsloth + OpenEnv)', fontsize=14, fontweight='bold')
-    ax1.set_xlabel('Training Steps')
-    ax1.set_ylabel('Reward Value')
-    ax1.legend()
-
-    # --- Chart 2: 7B SOTA vs Baselines ---
-    labels = ['Claude 3.5 Sonnet', 'GPT-4o', 'Our Agent (7B GRPO)']
-    scores = [68.4, 73.2, 91.5]
-    colors = ['#ED8936', '#48BB78', '#9F7AEA']
-    
-    bars = ax2.bar(labels, scores, color=colors, width=0.6)
-    ax2.set_ylim(0, 100)
-    ax2.set_title('Global Benchmark: Complex SQL Debugging', fontsize=14, fontweight='bold')
-    ax2.axhline(y=75, color='red', linestyle='--', alpha=0.3, label='Previous SOTA')
-    ax2.legend()
-    
-    for bar in bars:
-        yval = bar.get_height()
-        ax2.text(bar.get_x() + bar.get_width()/2, yval + 2, f'{yval}%', ha='center', fontweight='bold', fontsize=12)
-
-    plt.tight_layout()
-    plt.savefig("SOTA_graphs.png", dpi=300)
-    print("✅ Saved SOTA_graphs.png for your Pitch Deck!")
+    print("\n📊 Training artifacts saved under ./sota_results/artifacts")
 
 if __name__ == "__main__":
     run_sota_train()

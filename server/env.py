@@ -226,6 +226,43 @@ class SQLDebugEnv:
                 "steps_taken": steps_taken
             }
 
+    def to_observation(
+        self,
+        *,
+        last_action_type: str,
+        last_query_result: Optional[QueryResult] = None,
+        schema_info: Optional[SchemaInfo] = None,
+        error_details: Optional[str] = None,
+        sample_rows: Optional[List[Dict[str, Any]]] = None,
+        hint: Optional[str] = None,
+    ) -> SQLDebugObservation:
+        """
+        Build an observation from the current state without mutating the episode.
+        Useful for endpoints that want to return an observation (e.g. reviewer rejection)
+        without actually executing an action.
+        """
+        if self._state is None:
+            raise RuntimeError("Call reset() first")
+
+        return SQLDebugObservation(
+            task_id=self.task.task_id,
+            task_description=self.task.description,
+            original_query=self.task.broken_query,
+            current_query=self._state.current_query,
+            expected_description=self.task.expected_output_description,
+            last_action_type=last_action_type,
+            last_query_result=last_query_result,
+            steps_taken=self._state.steps_taken,
+            steps_remaining=max(0, self.task.max_steps - self._state.steps_taken),
+            current_score=self._state.best_score_so_far,
+            schema_info=schema_info,
+            error_details=error_details,
+            sample_rows=sample_rows,
+            hint=hint,
+            is_done=self._state.is_done,
+            success=self._state.success,
+        )
+
     def get_state(self) -> EpisodeState:
         if self._state is None:
             raise RuntimeError("Call reset() first")
@@ -235,4 +272,3 @@ class SQLDebugEnv:
         if self._db:
             self._db.close()
             self._db = None
-

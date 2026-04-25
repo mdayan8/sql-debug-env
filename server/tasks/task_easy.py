@@ -50,7 +50,7 @@ ordered from highest to lowest, top 5 only."""
 
     @property
     def expected_output_description(self) -> str:
-        return "5 rows: customer_name, total_value (DESC order). Alice Chen should be first with 2847.50."
+        return "5 rows: customer_name, total_value (DESC order). Alice Chen should be first with 1947.50."
 
     @property
     def broken_query(self) -> str:
@@ -154,4 +154,3 @@ INSERT INTO order_items VALUES (17,9,'Monitor',1,450.00)"""
     @property
     def hint(self) -> str:
         return "Hint: Check every SQL keyword spelling carefully. Also check that your ORDER BY column name exactly matches the alias in your SELECT clause."
-

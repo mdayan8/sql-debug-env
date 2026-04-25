@@ -17,3 +17,18 @@ __pycache__/
 
 # editor metadata
 .cursor/
+
+# local artifacts / large outputs
+wandb/
+graphify-out/
+.omx/
+.agent/
+
+# training outputs
+sota_results/
+sota_sql_agent_unsloth/
+pro_results/
+real_results/
+final_sql_agent/
+final_sql_agent.zip
+pro_training_logs.csv

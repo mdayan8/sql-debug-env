@@ -249,11 +249,12 @@ async def step_with_review(
         
         if not review["approved"]:
             # Reviewer rejected — return feedback without executing
-            # Penalize slightly for bad submission attempt
-            reward = -0.02
-            # Return current observation but add reviewer feedback
-            obs = state.to_observation()
-            obs.error_details = f"REVIEWER REJECTION: {review['reason']}"
+            # Keep reward in strict (0, 1) range for OpenEnv compatibility
+            reward = 0.001
+            obs = env.to_observation(
+                last_action_type="review_rejected",
+                error_details=f"REVIEWER REJECTION: {review['reason']}",
+            )
             
             return {
                 "observation": obs.model_dump(),
@@ -296,10 +297,26 @@ def reviewer_check(query: str, schema: Dict[str, Any]) -> Dict[str, Any]:
     if not referenced and tables:
         return {"approved": False, "reason": f"Query does not reference any valid tables. Available: {tables}"}
 
-    # Check 3: Syntax check via EXPLAIN
+    # Check 3: Syntax check via EXPLAIN on a lightweight schema stub.
+    # Build minimal CREATE TABLE statements from the provided schema so EXPLAIN
+    # doesn't fail with "no such table" for otherwise-valid queries.
     try:
         conn = sqlite3.connect(":memory:")
-        # We don't have the actual data here, but EXPLAIN works on syntax
+        for table_name, columns in (schema or {}).items():
+            if not columns:
+                continue
+            col_defs = []
+            for col in columns:
+                name = col.get("name", "col")
+                col_type = col.get("type", "TEXT")
+                nullable = col.get("nullable")
+                not_null = " NOT NULL" if str(nullable).upper() == "NO" else ""
+                col_defs.append(f"{name} {col_type}{not_null}")
+            cols_sql = ", ".join(col_defs) if col_defs else "id INTEGER"
+            conn.execute(f"CREATE TABLE IF NOT EXISTS {table_name} ({cols_sql})")
+
+        # We don't have the actual data here, but EXPLAIN is sufficient for
+        # catching syntax errors and many semantic issues.
         conn.execute(f"EXPLAIN {query}")
         conn.close()
     except sqlite3.OperationalError as e:
@@ -324,4 +341,3 @@ async def state(x_session_id: Optional[str] = Header(default=None)):
         return current_state.model_dump()
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
-
