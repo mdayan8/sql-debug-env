@@ -45,11 +45,19 @@ def bootstrap_deps() -> None:
     if os.environ.get("SKIP_BOOTSTRAP") == "1":
         return
 
+    # Ensure text-only transformers runs never hard-import torchvision even if it
+    # is present in the base image.
+    os.environ.setdefault("TRANSFORMERS_NO_TORCHVISION", "1")
+
+    # Ubuntu 24.04+ images may mark system Python as "externally managed"
+    # (PEP-668). Prefer an explicit opt-out for all pip ops in ephemeral jobs.
+    os.environ.setdefault("PIP_BREAK_SYSTEM_PACKAGES", "1")
+
     print("📦 Bootstrapping dependencies...")
 
     # Text-only run: torchvision/torchaudio are not required and are a common source
     # of crashes when torch versions shift in container images.
-    _pip(["uninstall", "-y", "torchvision", "torchaudio"], check=False)
+    _pip(["uninstall", "--break-system-packages", "-y", "torchvision", "torchaudio"], check=False)
 
     # Keep these scoped; avoid blanket -U to reduce resolver churn.
     _pip(
@@ -74,6 +82,10 @@ def bootstrap_deps() -> None:
             "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git",
         ]
     )
+
+    # Some dependency resolution paths can reintroduce torchvision. Remove it
+    # again right before importing transformers/trl.
+    _pip(["uninstall", "--break-system-packages", "-y", "torchvision", "torchaudio"], check=False)
 
 
 bootstrap_deps()
