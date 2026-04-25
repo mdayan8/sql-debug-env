@@ -66,7 +66,7 @@ def bootstrap_deps() -> None:
             "--break-system-packages",
             "httpx>=0.27.0",
             "datasets>=3.4.1,<4.4.0",
-            "trl>=0.18.2,<0.24.0",
+            "trl>=0.18.2,<=0.22.2",
             "mergekit",
             "llm-blender",
             "weave",
@@ -103,20 +103,6 @@ from datasets import Dataset
 import transformers.utils.hub
 if not hasattr(transformers.utils.hub, "TRANSFORMERS_CACHE"):
     transformers.utils.hub.TRANSFORMERS_CACHE = "/tmp"
-
-# CRITICAL FIX for vllm crash:
-# Create a valid Python module on disk to satisfy both importlib and TRL's hard imports.
-import os
-import sys
-vllm_dir = "/tmp/fake_vllm"
-os.makedirs(os.path.join(vllm_dir, "vllm", "distributed", "device_communicators", "pynccl"), exist_ok=True)
-open(os.path.join(vllm_dir, "vllm", "__init__.py"), "w").close()
-open(os.path.join(vllm_dir, "vllm", "distributed", "__init__.py"), "w").close()
-open(os.path.join(vllm_dir, "vllm", "distributed", "device_communicators", "__init__.py"), "w").close()
-with open(os.path.join(vllm_dir, "vllm", "distributed", "device_communicators", "pynccl", "__init__.py"), "w") as f:
-    f.write("class PyNcclCommunicator: pass\n")
-if vllm_dir not in sys.path:
-    sys.path.insert(0, vllm_dir)
 
 from trl import GRPOConfig, GRPOTrainer
 from unsloth import FastLanguageModel
