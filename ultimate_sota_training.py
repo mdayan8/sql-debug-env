@@ -104,13 +104,6 @@ import transformers.utils.hub
 if not hasattr(transformers.utils.hub, "TRANSFORMERS_CACHE"):
     transformers.utils.hub.TRANSFORMERS_CACHE = "/tmp"
 
-# CRITICAL FIX for vllm crash:
-# TRL's latest versions unconditionally import vllm in their extras module.
-# Since Unsloth uses its own fast inference backend, we mock vllm to prevent the crash.
-import sys
-from unittest.mock import MagicMock
-sys.modules['vllm'] = MagicMock()
-
 from trl import GRPOConfig, GRPOTrainer
 from unsloth import FastLanguageModel
 
