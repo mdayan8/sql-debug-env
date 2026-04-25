@@ -68,6 +68,7 @@ def bootstrap_deps() -> None:
             "datasets>=3.4.1,<4.4.0",
             "trl>=0.18.2,<=0.24.0",
             "mergekit",
+            "llm-blender",
             "wandb",
             "matplotlib",
         ]
