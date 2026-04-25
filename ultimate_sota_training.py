@@ -97,9 +97,22 @@ import httpx
 import torch
 from datasets import Dataset
 
-# CRITICAL FIX for llm_blender crash:
-# llm_blender unconditionally tries to import TRANSFORMERS_CACHE which was removed from transformers 4.40+.
-# Since we don't even use llm_blender, we just mock it here so TRL doesn't crash on import.
+# --- CRITICAL FIXES FOR HF JOBS ---
+# 1. Mock vllm: TRL's GRPOTrainer (v0.18+) has a buggy import path that hard-fails if vllm is missing,
+# even if you don't intend to use it. We mock the entire vllm hierarchy.
+import sys
+from unittest.mock import MagicMock
+for m in [
+    "vllm", 
+    "vllm.distributed", 
+    "vllm.distributed.device_communicators", 
+    "vllm.distributed.device_communicators.pynccl",
+    "vllm.model_executor",
+    "vllm.model_executor.parallel_utils",
+]:
+    sys.modules[m] = MagicMock()
+
+# 2. Mock llm_blender: It unconditionally tries to import TRANSFORMERS_CACHE which was removed in transformers 4.40+.
 import transformers.utils.hub
 if not hasattr(transformers.utils.hub, "TRANSFORMERS_CACHE"):
     transformers.utils.hub.TRANSFORMERS_CACHE = "/tmp"
