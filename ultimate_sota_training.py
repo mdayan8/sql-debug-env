@@ -30,6 +30,7 @@ Key stability choices:
 
 from __future__ import annotations
 
+import importlib.metadata as importlib_metadata
 import json
 import os
 import random
@@ -137,6 +138,20 @@ import torch
 from datasets import Dataset
 
 # --- CRITICAL FIXES FOR HF JOBS ---
+# 0. Unsloth checks importlib.metadata.version("vllm") at import time.
+# In text-only GRPO runs we don't install vllm, so return a dummy version instead
+# of crashing with PackageNotFoundError.
+_real_pkg_version = importlib_metadata.version
+
+
+def _safe_pkg_version(dist_name: str) -> str:
+    if dist_name == "vllm":
+        return "0.0.0"
+    return _real_pkg_version(dist_name)
+
+
+importlib_metadata.version = _safe_pkg_version
+
 # 1. Mock vllm: TRL's GRPOTrainer (v0.18+) has a buggy import path that hard-fails if vllm is missing.
 # We must provide a mock that satisfies both 'import' and 'importlib.util.find_spec'.
 import sys
@@ -160,13 +175,15 @@ def mock_vllm_hierarchy():
 
 mock_vllm_hierarchy()
 
+# Import Unsloth before transformers / trl for its patching path.
+from unsloth import FastLanguageModel
+
 # 2. Mock llm_blender: Fix for TRANSFORMERS_CACHE removal in transformers 4.40+.
 import transformers.utils.hub
 if not hasattr(transformers.utils.hub, "TRANSFORMERS_CACHE"):
     transformers.utils.hub.TRANSFORMERS_CACHE = "/tmp"
 
 from trl import GRPOConfig, GRPOTrainer
-from unsloth import FastLanguageModel
 
 # --- 1. CONFIGURATION (env-first; defaults match openenv.yaml) ---
 _DEFAULT_OPENENV_BASE = "https://md896-sql-debug-env.hf.space"
