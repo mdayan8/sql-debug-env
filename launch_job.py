@@ -37,8 +37,10 @@ _ROWS = os.environ.get("ROWS_PER_TASK", "64")
 _NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "2")
 _SKIP_PUSH = os.environ.get("SKIP_HUB_PUSH", "0")
 _TIMEOUT = os.environ.get("HF_JOB_TIMEOUT", "8h")
-# l4x1: newer GPU, good for Unsloth; use HF_JOB_FLAVOR=t4-small if queue or cost is better for you
-_FLAVOR = os.environ.get("HF_JOB_FLAVOR", "l4x1")
+_TRAIN_MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
+# 7B + GRPO creates a reference copy; 24GB cards (L4/A10G) can OOM.
+_DEFAULT_FLAVOR = "a100-large" if "7b" in _TRAIN_MODEL_NAME.lower() else "l4x1"
+_FLAVOR = os.environ.get("HF_JOB_FLAVOR", _DEFAULT_FLAVOR)
 _IMAGE = os.environ.get(
     "HF_JOB_IMAGE",
     "pytorch/pytorch:2.6.0-cuda12.4-cudnn9-devel",
@@ -71,7 +73,7 @@ _job_env = {
     "ROWS_PER_TASK": _ROWS,
     "GRPO_NUM_GENERATIONS": _NUM_GEN,
     "SKIP_HUB_PUSH": _SKIP_PUSH,
-    "TRAIN_MODEL_NAME": os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct"),
+    "TRAIN_MODEL_NAME": _TRAIN_MODEL_NAME,
     "TRAIN_LR": os.environ.get("TRAIN_LR", "3e-6"),
     "TASK_EVAL_SAMPLES": os.environ.get("TASK_EVAL_SAMPLES", "16"),
     "ARTIFACT_SPACE_ID": os.environ.get("ARTIFACT_SPACE_ID", "md896/sql-debug-env"),
@@ -93,7 +95,7 @@ if __name__ == "__main__":
     )
     print("JOB_ID:", job.id)
     print("JOB_URL:", job.url)
-    print("FLAVOR:", _FLAVOR, "| TRAIN_MAX_STEPS:", _MAX_STEPS, "| ROWS_PER_TASK:", _ROWS)
+    print("FLAVOR:", _FLAVOR, "| TRAIN_MAX_STEPS:", _MAX_STEPS, "| ROWS_PER_TASK:", _ROWS, "| TRAIN_MODEL_NAME:", _TRAIN_MODEL_NAME)
     print(
         "Note: SCHEDULING is Hugging Face queue time, not your script. "
         "Cancel stuck jobs and retry, or try HF_JOB_FLAVOR=t4-small / t4-medium."

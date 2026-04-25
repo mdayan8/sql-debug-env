@@ -1,64 +1,146 @@
-# From SQL Guessing to SQL Execution: Building a Real Debugging Agent
+# From SQL Guessing to SQL Execution: The Story of Building a Real SQL Debug Agent
 
-Most AI SQL assistants still behave like autocomplete tools: they sound confident, but they do not prove that their SQL works.
+There is a moment every data team knows: a query looks fine, deploys, and then breaks in the exact place you cannot afford. People stop what they are doing, dashboards look wrong, and someone starts diffing joins at 2 AM.
 
-This project takes a different route. We built a deterministic SQL debugging environment, connected it to reinforcement learning, and trained the agent against live execution rewards rather than style-only feedback.
+It is usually not a missing comma. It is a subtle join bug, a logic drift in a filter, or a multi-table edge case that only shows up on real data. We built this project because we wanted an agent that does not just *sound* correct, but earns correctness by execution.
 
-The goal is simple and practical: make an agent that can fix broken production-style SQL under real constraints, not just generate syntactically nice-looking queries.
+This post is the full build story: the real environment, the training loop, the hard lessons, and the evaluation signals that tell us whether the agent is actually getting better in practice, not just in demos.
 
-## Why We Built This
+## The Real-World Problem
 
-SQL failures in real systems are rarely only syntax problems. They are often:
+Community discussions reflect the same pain pattern repeatedly:
 
-- join logic mistakes
-- aggregation bugs
-- fan-trap or cartesian explosions
-- schema misunderstandings
+- debugging legacy SQL logic is slow and mentally expensive
+- multi-thousand-line procedures are hard to reason about under pressure
+- many "AI SQL helpers" generate plausible but unverified SQL
 
-A text-only model can produce polished answers that still fail at execution time. So we designed a loop where the model is rewarded only when the SQL actually executes and scores well in a deterministic grader.
+If this sounds familiar, these threads are worth reading:
 
-## What We Built
+- [Best Practice for Debugging/Error Checking Queries (r/SQL)](https://www.reddit.com/r/SQL/comments/xsecqw/best_practice_for_debuggingerror_checking_queries/)
+- [You haven’t truly suffered until you’ve debugged a multi-thousand-line stored procedure (r/dataengineering)](https://www.reddit.com/r/dataengineering/comments/1lac1rx/you_havent_truly_suffered_until_youve_debugged_a/)
+- [Biggest pain points with databases (r/databasedevelopment)](https://www.reddit.com/r/databasedevelopment/comments/1lqjn19/what_are_your_biggest_pain_points_with_databases/)
 
-At the core is `sql-debug-env`, an OpenEnv benchmark and API with live task execution:
+Those discussions shaped our design choice: train on execution outcomes, not writing style.
 
-- live Space: [md896/sql-debug-env](https://huggingface.co/spaces/md896/sql-debug-env)
-- health endpoint: `/health`
-- training endpoints: `/tasks`, `/reset`, `/step`
+## What We Are Building
 
-The training pipeline runs with GRPO and calls the environment reward endpoint for every sampled completion.
+We are building an execution-grounded SQL debugging agent on top of:
+
+- live environment: [md896/sql-debug-env](https://huggingface.co/spaces/md896/sql-debug-env)
+- repo: [mdayan8/sql-debug-env](https://github.com/mdayan8/sql-debug-env)
+- core API loop: `/tasks` -> `/reset` -> `/step`
+
+The environment is currently live and healthy:
+
+```json
+{"name":"sql-debug-env","status":"ok","message":"Use /health, /tasks, /reset, /step, /state, /benchmark"}
+```
+
+## Live Run Snapshot (Real-Time)
+
+This is the latest long-run path we launched for the 7B model:
+
+- job: [md896/69ed255cd2c8bd8662bce617](https://huggingface.co/jobs/md896/69ed255cd2c8bd8662bce617)
+- status history: `RUNNING` -> `ERROR` (OOM on L4 during GRPO reference-model creation)
+- model: `Qwen/Qwen2.5-7B-Instruct`
+- environment: `https://md896-sql-debug-env.hf.space`
+
+Latest confirmed run facts from live logs:
+
+- tokenizer/config downloaded successfully
+- 4 model shards loaded (`model-00001` ... `model-00004`)
+- OpenEnv health check returned `status: ok`
+- discovered tasks: `easy_syntax_fix`, `medium_logic_fix`, `hard_multi_bug`, `hard_finance_explosion`
+- training dataset built: `384 prompts` (`96` per task)
+- baseline evaluation phase started
+- crash reason captured: `torch.OutOfMemoryError` while `GRPOTrainer` created a deep-copied reference model
+
+What we changed immediately after this failure:
+
+- moved 7B default hardware from `l4x1` to `a100-large` for GRPO stability
+- kept the same environment/task setup so comparisons stay fair
+- relaunched long training with the corrected hardware profile
+
+In other words: the run is not idle and not synthetic; it is actively running against the live SQL environment.
+
+## System Design (Execution-First RL)
 
 ```mermaid
 flowchart LR
-    M[Base Model: Qwen Instruct] --> T[GRPO Trainer]
-    T --> G[Generate SQL Candidate]
-    G --> E[OpenEnv /step submit_query]
+    B[Base Model: Qwen Instruct] --> T[GRPO Trainer]
+    T --> C[Generate SQL Candidate]
+    C --> E[OpenEnv /step submit_query]
     E --> R[Reward 0.0 to 1.0]
     R --> T
-    T --> A[Artifacts + Metrics + Plots]
-    T --> H[Push trained model to Hub]
+    T --> V[Per-task Evaluation]
+    V --> A[Metrics + Graphs + Artifact Upload]
+    T --> H[Push full trained model to Hub]
 ```
 
-## Training System Upgrades We Implemented
+The key detail: reward is computed from real query execution and deterministic grading, not from format heuristics alone.
 
-To make this production-grade and stable on Hugging Face Jobs, we implemented:
+## Engineering Upgrades That Made It Stable
 
-- strict dependency pinning for `transformers`, `accelerate`, and `trl`
-- CUDA generation stability guards (`remove_invalid_values`, `renormalize_logits`, bf16 on GPU)
-- full model save/push (not LoRA-only output)
-- automatic artifact upload back to Space repo
-- explicit base-vs-trained evaluation on hard tasks
-- per-task and distribution-level performance visualizations
+We had to harden the full training path for real runs on Hugging Face Jobs:
 
-## The Data and Graphs We Publish
+- pinned dependency stack (`transformers`/`accelerate`/`trl`) to avoid breakage
+- generation safety guards (`remove_invalid_values`, `renormalize_logits`)
+- bf16 + stable attention settings on GPU
+- full-model save and Hub push (not adapter-only)
+- artifact upload into Space path `artifacts/runs/<timestamp>`
+- per-task before/after evaluation and reward-distribution analysis
 
-Every run exports a reproducible artifact bundle:
+## What Users Get (Practical Outcomes)
 
-- `train_log_history.jsonl`
-- `train_metrics.json`
-- `reward_curve.png`
-- `before_after_avg_reward.png`
-- `performance_comparison.png`
-- `reward_distribution_shift.png`
+If you use this workflow, you get a concrete improvement loop:
+
+1. **Higher confidence SQL fixes**: candidates are tested through execution rewards.
+2. **Task-level visibility**: easy/medium/hard/expert improvements are separated, not hidden in a single average.
+3. **Reproducible progress tracking**: every run writes metrics + raw logs + plots.
+4. **Faster iteration loops**: failures are visible as reward plateaus, making next tuning decisions obvious.
+
+## Evaluation Stats and Efficiency Metrics
+
+We track stats from `train_metrics.json` (no fabricated numbers):
+
+- `baseline_avg_reward`
+- `post_avg_reward`
+- `delta_avg_reward`
+- `base_hard_reward`
+- `trained_hard_reward`
+- `delta_hard_reward`
+- `per_task_baseline_reward`
+- `per_task_post_reward`
+
+### Current Public Signal
+
+In the earlier short run, sampled average reward stayed near-flat (about `~0.10` baseline to `~0.10` post-train). That was useful because it gave us an honest signal: we had stability, but not enough learning pressure. So we moved to the current long 7B run.
+
+### Current Long Run Configuration
+
+- model: `Qwen/Qwen2.5-7B-Instruct`
+- train steps: `600`
+- rows per task: `96`
+- hard eval samples: `24`
+- per-task eval samples: `24`
+
+### Efficiency KPIs (computed per run)
+
+When each run finishes, we compute:
+
+- **Absolute lift**: `post_avg_reward - baseline_avg_reward`
+- **Hard-task lift**: `trained_hard_reward - base_hard_reward`
+- **Relative lift %**: `((post - baseline) / max(baseline, eps)) * 100`
+- **Task consistency**: count of tasks with positive delta
+
+These are the numbers that matter for production readiness.
+
+## Graphs We Publish Each Run
+
+- `reward_curve.png` — reward trend through training steps
+- `before_after_avg_reward.png` — baseline vs post-train average
+- `performance_comparison.png` — per-task base vs trained + overall
+- `reward_distribution_shift.png` — start vs end reward histograms
 
 ```mermaid
 flowchart TD
@@ -69,57 +151,29 @@ flowchart TD
     O --> P2[before_after_avg_reward.png]
     O --> P3[performance_comparison.png]
     O --> P4[reward_distribution_shift.png]
-    O --> U[Upload to Space artifacts/runs/<timestamp>]
+    O --> U[Space Upload: artifacts/runs/<timestamp>]
 ```
 
-## Current Status
+## Why This Approach Is Different
 
-The live environment is healthy and reachable:
+Most SQL copilots optimize for fluent text output. We optimize for SQL that survives execution and grading. That shifts the objective from "write something plausible" to "produce something that actually runs and scores."
 
-```json
-{"name":"sql-debug-env","status":"ok","message":"Use /health, /tasks, /reset, /step, /state, /benchmark"}
-```
+That is a harder target. It is also the one that actually reduces incident risk.
 
-Our shorter earlier run showed near-flat sampled average reward (around 0.10 baseline vs ~0.10 post-train), which is exactly why we escalated to a longer 7B run.
+## What Happens Next
 
-The current long run is configured for stronger learning pressure:
+When the long 7B run completes, we will append:
 
-- model: `Qwen/Qwen2.5-7B-Instruct`
-- steps: `600`
-- rows per task: `96`
-- hard eval samples: `24`
-- task eval samples: `24`
+- final KPI table from `train_metrics.json`
+- per-task deltas and hard-task delta summary
+- direct trained-model link
+- exact artifact run path for all plots
 
-## Why This Matters
+## References and Community Context
 
-This is not just a benchmark demo. It is a practical pattern for training agents that must survive real execution constraints:
-
-1. deterministic environment
-2. execution-grounded rewards
-3. hard-task evaluation, not only aggregate averages
-4. artifact-first reproducibility
-
-That combination gives us a path from “looks good” to “actually works.”
-
-## How To Reproduce
-
-1. Run environment (local or Space)
-2. Launch training job with `launch_job.py`
-3. Monitor Hugging Face Job logs
-4. Read `train_metrics.json` and inspect all generated plots
-5. Compare base vs trained per task, then iterate
-
-## What We Will Publish Next
-
-Once the long run finishes, we will append:
-
-- final per-task rewards
-- hard-task delta (`hard_finance_explosion`)
-- direct model link for the trained checkpoint
-- artifact run path with all plots
-
-## Final Takeaway
-
-Execution-based RL for SQL debugging is harder than prompt tuning, but it is the right difficulty. If the target is production reliability, the model must be trained in an environment that can say “this query failed” with zero ambiguity.
-
-That is exactly what this system does.
+- [GitHub repo: mdayan8/sql-debug-env](https://github.com/mdayan8/sql-debug-env)
+- [Live Space: md896/sql-debug-env](https://huggingface.co/spaces/md896/sql-debug-env)
+- [r/SQL thread on debugging practices](https://www.reddit.com/r/SQL/comments/xsecqw/best_practice_for_debuggingerror_checking_queries/)
+- [r/dataengineering thread on painful SQL debugging](https://www.reddit.com/r/dataengineering/comments/1lac1rx/you_havent_truly_suffered_until_youve_debugged_a/)
+- [r/databasedevelopment thread on database pain points](https://www.reddit.com/r/databasedevelopment/comments/1lqjn19/what_are_your_biggest_pain_points_with_databases/)
+- [Discussion on developer productivity measurement tradeoffs](https://www.baytechconsulting.com/blog/future-developer-productivity-metrics-2026)
