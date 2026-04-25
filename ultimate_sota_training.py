@@ -98,21 +98,30 @@ import torch
 from datasets import Dataset
 
 # --- CRITICAL FIXES FOR HF JOBS ---
-# 1. Mock vllm: TRL's GRPOTrainer (v0.18+) has a buggy import path that hard-fails if vllm is missing,
-# even if you don't intend to use it. We mock the entire vllm hierarchy.
+# 1. Mock vllm: TRL's GRPOTrainer (v0.18+) has a buggy import path that hard-fails if vllm is missing.
+# We must provide a mock that satisfies both 'import' and 'importlib.util.find_spec'.
 import sys
+import types
+import importlib.machinery
 from unittest.mock import MagicMock
-for m in [
-    "vllm", 
-    "vllm.distributed", 
-    "vllm.distributed.device_communicators", 
-    "vllm.distributed.device_communicators.pynccl",
-    "vllm.model_executor",
-    "vllm.model_executor.parallel_utils",
-]:
-    sys.modules[m] = MagicMock()
 
-# 2. Mock llm_blender: It unconditionally tries to import TRANSFORMERS_CACHE which was removed in transformers 4.40+.
+def mock_vllm_hierarchy():
+    for m_name in [
+        "vllm", 
+        "vllm.distributed", 
+        "vllm.distributed.device_communicators", 
+        "vllm.distributed.device_communicators.pynccl",
+        "vllm.model_executor",
+        "vllm.model_executor.parallel_utils",
+    ]:
+        mock_m = MagicMock(spec=types.ModuleType)
+        mock_m.__name__ = m_name
+        mock_m.__spec__ = importlib.machinery.ModuleSpec(m_name, None)
+        sys.modules[m_name] = mock_m
+
+mock_vllm_hierarchy()
+
+# 2. Mock llm_blender: Fix for TRANSFORMERS_CACHE removal in transformers 4.40+.
 import transformers.utils.hub
 if not hasattr(transformers.utils.hub, "TRANSFORMERS_CACHE"):
     transformers.utils.hub.TRANSFORMERS_CACHE = "/tmp"
