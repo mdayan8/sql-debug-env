@@ -27,6 +27,7 @@ import os
 import shlex
 
 from huggingface_hub import HfApi
+from huggingface_hub.utils import get_token
 
 _DEFAULT_REPO = "https://huggingface.co/spaces/md896/sql-debug-env"
 _REPO_URL = os.environ.get("TRAIN_REPO_GIT_URL", _DEFAULT_REPO)
@@ -45,8 +46,13 @@ _IMAGE = os.environ.get(
 _NAMESPACE = os.environ.get("HF_JOB_NAMESPACE")
 
 _SECRETS = None
+_local_hf_token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN") or get_token()
 if _SKIP_PUSH.strip().lower() not in ("1", "true", "yes"):
-    _SECRETS = {"HF_TOKEN": "HF_TOKEN"}
+    if _local_hf_token:
+        _SECRETS = {"HF_TOKEN": _local_hf_token}
+    else:
+        # Job can still train; push/upload steps in script will gracefully skip/fail with clear logs.
+        _SECRETS = None
 
 # One line only — survives UI/API newline flattening.
 _bash = (
@@ -65,6 +71,9 @@ _job_env = {
     "ROWS_PER_TASK": _ROWS,
     "GRPO_NUM_GENERATIONS": _NUM_GEN,
     "SKIP_HUB_PUSH": _SKIP_PUSH,
+    "ARTIFACT_SPACE_ID": os.environ.get("ARTIFACT_SPACE_ID", "md896/sql-debug-env"),
+    "MODEL_HUB_REPO_ID": os.environ.get("MODEL_HUB_REPO_ID", "md896/sql-debug-agent-qwen05b-grpo"),
+    "HARD_EVAL_SAMPLES": os.environ.get("HARD_EVAL_SAMPLES", "16"),
 }
 
 if __name__ == "__main__":

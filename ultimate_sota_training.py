@@ -118,6 +118,7 @@ bootstrap_deps()
 import httpx
 import torch
 from datasets import Dataset
+from huggingface_hub import HfApi
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
@@ -188,6 +189,24 @@ def make_real_dataset() -> Dataset:
     return Dataset.from_list(rows)
 
 
+def make_task_dataset(task_id: str, rows_per_task: int) -> Dataset:
+    bridge = get_bridge_url()
+    timeout = get_request_timeout()
+    marker = os.environ.get("COMPLETION_SQL_MARKER", "Fixed SQL:")
+    with httpx.Client(base_url=bridge, headers=BYPASS_HEADERS, timeout=timeout) as client:
+        resp = client.post("/reset", json={"task_id": task_id})
+        resp.raise_for_status()
+        obs = resp.json()["observation"]
+    prompt = (
+        "Fix the following SQL query and provide only the fixed SQL.\n"
+        f"Task: {obs['task_description']}\n"
+        f"Broken Query: {obs['original_query']}\n"
+        f"{marker}"
+    )
+    rows = [{"prompt": prompt, "task_id": task_id} for _ in range(max(1, rows_per_task))]
+    return Dataset.from_list(rows)
+
+
 # --- 3. One live OpenEnv reward (colab_real_world style) ---
 
 
@@ -221,6 +240,35 @@ def openenv_sql_reward_func(completions, task_id, **kwargs):
             r += random.uniform(-1e-6, 1e-6)
             rewards.append(r)
     return rewards
+
+
+def eval_model_reward(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    dataset: Dataset,
+    *,
+    max_items: int,
+) -> float:
+    subset = dataset.select(range(min(max_items, len(dataset))))
+    prompts = subset["prompt"]
+    task_ids = subset["task_id"]
+    completions: List[str] = []
+    for prompt in prompts:
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            out = model.generate(
+                **inputs,
+                max_new_tokens=256,
+                do_sample=True,
+                temperature=float(os.environ.get("EVAL_TEMPERATURE", "0.7")),
+                top_p=float(os.environ.get("EVAL_TOP_P", "0.9")),
+                renormalize_logits=True,
+                remove_invalid_values=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        completions.append(tokenizer.decode(out[0], skip_special_tokens=True))
+    rewards = openenv_sql_reward_func(completions, task_ids)
+    return float(sum(rewards) / max(len(rewards), 1))
 
 
 # --- 3b. ARTIFACTS / PLOTS (REAL, FROM LOGS) ---
@@ -372,33 +420,12 @@ def run_sota_train():
 
     train_dataset = make_real_dataset()
 
-    def quick_exec_eval(max_items: int = 8) -> float:
-        """Sample prompts, generate completions, score with the same OpenEnv SQL reward."""
-        subset = train_dataset.select(range(min(max_items, len(train_dataset))))
-        prompts = subset["prompt"]
-        task_ids = subset["task_id"]
-
-        completions: List[str] = []
-        for prompt in prompts:
-            inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-            with torch.no_grad():
-                out = model.generate(
-                    **inputs,
-                    max_new_tokens=256,
-                    do_sample=True,
-                    temperature=float(os.environ.get("EVAL_TEMPERATURE", "0.7")),
-                    top_p=float(os.environ.get("EVAL_TOP_P", "0.9")),
-                    renormalize_logits=True,
-                    remove_invalid_values=True,
-                    pad_token_id=tokenizer.eos_token_id,
-                )
-            completions.append(tokenizer.decode(out[0], skip_special_tokens=True))
-
-        rewards = openenv_sql_reward_func(completions, task_ids)
-        return float(sum(rewards) / max(len(rewards), 1))
-
     print("Quick baseline eval (pre-train)...")
-    baseline_avg_reward = quick_exec_eval()
+    baseline_avg_reward = eval_model_reward(model, tokenizer, train_dataset, max_items=8)
+
+    hard_eval_n = int(os.environ.get("HARD_EVAL_SAMPLES", "16"))
+    hard_dataset = make_task_dataset("hard_finance_explosion", rows_per_task=hard_eval_n)
+    base_hard_reward = eval_model_reward(model, tokenizer, hard_dataset, max_items=hard_eval_n)
 
     report_to = _resolve_report_to()
     tb_dir = Path(out_dir) / "tensorboard"
@@ -452,7 +479,8 @@ def run_sota_train():
     trainer.train()
 
     print("Quick eval (post-train)...")
-    post_avg_reward = quick_exec_eval()
+    post_avg_reward = eval_model_reward(model, tokenizer, train_dataset, max_items=8)
+    trained_hard_reward = eval_model_reward(model, tokenizer, hard_dataset, max_items=hard_eval_n)
 
     # --- Save artifacts (real logs/plots) ---
     artifacts = ArtifactPaths(root=Path(out_dir) / "artifacts")
@@ -474,6 +502,9 @@ def run_sota_train():
             "baseline_avg_reward": baseline_avg_reward,
             "post_avg_reward": post_avg_reward,
             "delta_avg_reward": post_avg_reward - baseline_avg_reward,
+            "base_hard_reward": base_hard_reward,
+            "trained_hard_reward": trained_hard_reward,
+            "delta_hard_reward": trained_hard_reward - base_hard_reward,
             "tensorboard_dir": str(tb_dir) if report_to == "tensorboard" else None,
             "report_to": report_to,
         }
@@ -497,20 +528,40 @@ def run_sota_train():
     except Exception as e:
         print(f"Could not generate before/after plot: {e}")
 
-    lora_dir = os.environ.get("LORA_SAVE_DIR", "./sota_sql_agent_unsloth")
-    print("\nSaving LoRA weights locally...")
-    model.save_pretrained(lora_dir)
+    model_dir = os.environ.get("MODEL_SAVE_DIR", "./sota_sql_agent_full")
+    print("\nSaving trained model locally...")
+    model.save_pretrained(model_dir)
 
-    hub_id = os.environ.get("HF_HUB_REPO_ID", "md896/sota-sql-agent-7b")
+    hub_id = os.environ.get("MODEL_HUB_REPO_ID", os.environ.get("HF_HUB_REPO_ID", "md896/sql-debug-agent-qwen05b-grpo"))
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGING_FACE_HUB_TOKEN")
     if os.environ.get("SKIP_HUB_PUSH", "").strip() in ("1", "true", "yes"):
         print("SKIP_HUB_PUSH set — not pushing to Hub.")
     else:
         try:
             model.push_to_hub(hub_id, token=token)
-            print(f"Pushed LoRA to https://huggingface.co/{hub_id}")
+            tokenizer.push_to_hub(hub_id, token=token)
+            print(f"Pushed trained model to https://huggingface.co/{hub_id}")
         except Exception as e:
-            print(f"Hub push failed (set HF_TOKEN / HF_HUB_REPO_ID or SKIP_HUB_PUSH=1): {e}")
+            print(f"Hub push failed (set HF_TOKEN / MODEL_HUB_REPO_ID or SKIP_HUB_PUSH=1): {e}")
+
+    # Upload run artifacts back to the Space repo so you can download/view them.
+    artifact_space = os.environ.get("ARTIFACT_SPACE_ID", "md896/sql-debug-env")
+    run_tag = time.strftime("%Y%m%d-%H%M%S")
+    try:
+        if token:
+            api = HfApi(token=token)
+            api.upload_folder(
+                repo_id=artifact_space,
+                repo_type="space",
+                folder_path=str(artifacts.root),
+                path_in_repo=f"artifacts/runs/{run_tag}",
+                commit_message=f"Add training artifacts {run_tag}",
+            )
+            print(f"Uploaded artifacts to https://huggingface.co/spaces/{artifact_space}/tree/main/artifacts/runs/{run_tag}")
+        else:
+            print("No HF token in job env; skipping artifact upload.")
+    except Exception as e:
+        print(f"Artifact upload failed: {e}")
 
     print(f"\nTraining artifacts under {artifacts.root}")
 
