@@ -16,6 +16,8 @@ Environment (control cost vs quality on HF Jobs / local GPU):
   Artifacts: artifacts/train_log_history.jsonl, metrics, plots
   HF_HUB_REPO_ID            — push target (default md896/sota-sql-agent-7b)
   SKIP_HUB_PUSH=1           — do not push after train
+  SKIP_PRETRAIN_EVAL=1    — skip baseline/per-task/hard eval before GRPO (faster to step logs; weaker metrics)
+  ATTN_IMPLEMENTATION       — default sdpa on CUDA (else eager); set eager if you hit attention errors
   HF_TOKEN / HUGGING_FACE_HUB_TOKEN — Hub auth for push
 
 Designed for Hugging Face Jobs / Spaces where:
@@ -31,6 +33,7 @@ Key stability choices:
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import subprocess
@@ -616,12 +619,16 @@ def run_sota_train():
     use_cuda = torch.cuda.is_available()
     # L4/A10/A100 are typically more numerically stable with bf16 than fp16 for RL-style sampling.
     torch_dtype = torch.bfloat16 if use_cuda else torch.float32
+    # Default sdpa on CUDA: avoids Qwen sliding-window + "eager" mismatch warning; override with ATTN_IMPLEMENTATION=eager if needed.
+    _attn = os.environ.get("ATTN_IMPLEMENTATION", "sdpa" if use_cuda else "eager")
+    print(f"Loading model weights (attn={_attn}) — Hub download only on cold cache / fresh job disk...")
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_NAME,
         torch_dtype=torch_dtype,
         device_map="auto",
-        attn_implementation=os.environ.get("ATTN_IMPLEMENTATION", "eager"),
+        attn_implementation=_attn,
     )
+    print("=== Model load finished (checkpoint shards in VRAM). Not training yet. ===", flush=True)
     # Runtime generation safety defaults (used by both eval and GRPO generate path).
     model.generation_config.remove_invalid_values = True
     model.generation_config.renormalize_logits = True
@@ -630,23 +637,51 @@ def run_sota_train():
 
     train_dataset = make_real_dataset()
 
-    print("Quick baseline eval (pre-train)...")
-    baseline_avg_reward = eval_model_reward(model, tokenizer, train_dataset, max_items=8)
-
     eval_samples = max(4, int(os.environ.get("TASK_EVAL_SAMPLES", "12")))
-    with httpx.Client(base_url=get_bridge_url(), headers=BYPASS_HEADERS, timeout=get_request_timeout()) as client:
-        eval_task_ids = _fetch_task_ids(client)
-    before_by_task: Dict[str, float] = {}
-    before_samples_all: List[float] = []
-    for t_id in eval_task_ids:
-        ds = make_task_dataset(t_id, rows_per_task=eval_samples)
-        samples = eval_model_reward_samples(model, tokenizer, ds, max_items=eval_samples)
-        before_samples_all.extend(samples)
-        before_by_task[t_id] = float(sum(samples) / max(1, len(samples)))
+    skip_pre = os.environ.get("SKIP_PRETRAIN_EVAL", "").strip().lower() in ("1", "true", "yes")
+    if skip_pre:
+        print(
+            "SKIP_PRETRAIN_EVAL=1 — skipping baseline / per-task / hard pre-eval (faster to GRPO steps; "
+            "artifacts will miss before_* metrics).",
+            flush=True,
+        )
+        baseline_avg_reward = None  # type: ignore[assignment]
+        eval_task_ids = []
+        before_by_task = {}
+        before_samples_all = []
+        hard_eval_n = int(os.environ.get("HARD_EVAL_SAMPLES", "16"))
+        hard_dataset = make_task_dataset("hard_finance_explosion", rows_per_task=hard_eval_n)
+        base_hard_reward = None  # type: ignore[assignment]
+    else:
+        print(
+            "=== Pre-training evaluation (HTTP + generate per sample; can take many minutes). "
+            "GRPO step logs start only after this block. ===",
+            flush=True,
+        )
+        print("Quick baseline eval (pre-train)...", flush=True)
+        baseline_avg_reward = eval_model_reward(model, tokenizer, train_dataset, max_items=8)
 
-    hard_eval_n = int(os.environ.get("HARD_EVAL_SAMPLES", "16"))
-    hard_dataset = make_task_dataset("hard_finance_explosion", rows_per_task=hard_eval_n)
-    base_hard_reward = eval_model_reward(model, tokenizer, hard_dataset, max_items=hard_eval_n)
+        with httpx.Client(base_url=get_bridge_url(), headers=BYPASS_HEADERS, timeout=get_request_timeout()) as client:
+            eval_task_ids = _fetch_task_ids(client)
+        print(
+            f"Per-task pre-eval: {len(eval_task_ids)} tasks × up to {eval_samples} samples each "
+            f"(sequential; watch for slow OpenEnv).",
+            flush=True,
+        )
+        before_by_task: Dict[str, float] = {}
+        before_samples_all: List[float] = []
+        for t_id in eval_task_ids:
+            print(f"  pre-eval task_id={t_id!r} ...", flush=True)
+            ds = make_task_dataset(t_id, rows_per_task=eval_samples)
+            samples = eval_model_reward_samples(model, tokenizer, ds, max_items=eval_samples)
+            before_samples_all.extend(samples)
+            before_by_task[t_id] = float(sum(samples) / max(1, len(samples)))
+
+        hard_eval_n = int(os.environ.get("HARD_EVAL_SAMPLES", "16"))
+        hard_dataset = make_task_dataset("hard_finance_explosion", rows_per_task=hard_eval_n)
+        print(f"Hard-set pre-eval ({hard_eval_n} samples)...", flush=True)
+        base_hard_reward = eval_model_reward(model, tokenizer, hard_dataset, max_items=hard_eval_n)
+        print("=== Pre-training evaluation done. Building GRPOTrainer next. ===", flush=True)
 
     report_to = _resolve_report_to()
     tb_dir = Path(out_dir) / "tensorboard"
@@ -698,12 +733,19 @@ def run_sota_train():
         processing_class=tokenizer,
     )
 
-    print("Training with live execution rewards against OpenEnv...")
+    print(
+        f"=== Starting trainer.train() — GRPO max_steps={max_steps} (this is where step/reward logs appear) ===",
+        flush=True,
+    )
     trainer.train()
 
     print("Quick eval (post-train)...")
     post_avg_reward = eval_model_reward(model, tokenizer, train_dataset, max_items=8)
     trained_hard_reward = eval_model_reward(model, tokenizer, hard_dataset, max_items=hard_eval_n)
+    if not eval_task_ids:
+        with httpx.Client(base_url=get_bridge_url(), headers=BYPASS_HEADERS, timeout=get_request_timeout()) as client:
+            eval_task_ids = _fetch_task_ids(client)
+        print(f"Post-train per-task eval on {len(eval_task_ids)} task(s).", flush=True)
     after_by_task: Dict[str, float] = {}
     after_samples_all: List[float] = []
     for t_id in eval_task_ids:
@@ -724,6 +766,16 @@ def run_sota_train():
         metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
     except Exception:
         metrics = {}
+    _delta_avg = (
+        None
+        if baseline_avg_reward is None
+        else float(post_avg_reward) - float(baseline_avg_reward)
+    )
+    _delta_hard = (
+        None
+        if base_hard_reward is None
+        else float(trained_hard_reward) - float(base_hard_reward)
+    )
     metrics.update(
         {
             "openenv_base_url": get_bridge_url(),
@@ -731,10 +783,10 @@ def run_sota_train():
             "model_name": MODEL_NAME,
             "baseline_avg_reward": baseline_avg_reward,
             "post_avg_reward": post_avg_reward,
-            "delta_avg_reward": post_avg_reward - baseline_avg_reward,
+            "delta_avg_reward": _delta_avg,
             "base_hard_reward": base_hard_reward,
             "trained_hard_reward": trained_hard_reward,
-            "delta_hard_reward": trained_hard_reward - base_hard_reward,
+            "delta_hard_reward": _delta_hard,
             "per_task_baseline_reward": before_by_task,
             "per_task_post_reward": after_by_task,
             "task_eval_samples": eval_samples,
@@ -752,15 +804,18 @@ def run_sota_train():
 
         labels = ["baseline", "post-train"]
         values = [baseline_avg_reward, post_avg_reward]
-        plt.figure(figsize=(5, 4))
-        plt.bar(labels, values, color=["#94a3b8", "#22c55e"])
-        plt.ylim(0, max(1.0, max(values) * 1.1))
-        plt.title("Avg execution reward (sampled)")
-        plt.ylabel("avg reward")
-        out_path = artifacts.root / "before_after_avg_reward.png"
-        plt.tight_layout()
-        plt.savefig(out_path, dpi=200)
-        print(f"Saved {out_path}")
+        if baseline_avg_reward is None or any(isinstance(v, float) and math.isnan(v) for v in values):
+            print("Skipping before/after bar chart (missing baseline or post NaN).", flush=True)
+        else:
+            plt.figure(figsize=(5, 4))
+            plt.bar(labels, values, color=["#94a3b8", "#22c55e"])
+            plt.ylim(0, max(1.0, max(values) * 1.1))
+            plt.title("Avg execution reward (sampled)")
+            plt.ylabel("avg reward")
+            out_path = artifacts.root / "before_after_avg_reward.png"
+            plt.tight_layout()
+            plt.savefig(out_path, dpi=200)
+            print(f"Saved {out_path}")
     except Exception as e:
         print(f"Could not generate before/after plot: {e}")
     try:
