@@ -3,10 +3,10 @@
 
 import os
 print("📦 Installing State-of-the-Art Libraries (Unsloth & TRL)...")
-os.system('pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"')
+os.system('pip install "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git" --break-system-packages')
 # Removed the pip install -U line as Unsloth installs the correct versions of trl, accelerate, peft automatically
 # Installing torchao separately since torch 2.5 has missing torch.int1 attribute in some versions of torchao. Actually unsloth handles torchao.
-os.system("pip install wandb matplotlib")
+os.system("pip install wandb matplotlib --break-system-packages")
 
 import httpx
 import torch
