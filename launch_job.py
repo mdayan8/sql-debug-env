@@ -32,8 +32,8 @@ from huggingface_hub.utils import get_token
 _DEFAULT_REPO = "https://huggingface.co/spaces/md896/sql-debug-env"
 _REPO_URL = os.environ.get("TRAIN_REPO_GIT_URL", _DEFAULT_REPO)
 _OPENENV = os.environ.get("OPENENV_BASE_URL", "https://md896-sql-debug-env.hf.space")
-_MAX_STEPS = os.environ.get("TRAIN_MAX_STEPS", "80")
-_ROWS = os.environ.get("ROWS_PER_TASK", "32")
+_MAX_STEPS = os.environ.get("TRAIN_MAX_STEPS", "240")
+_ROWS = os.environ.get("ROWS_PER_TASK", "64")
 _NUM_GEN = os.environ.get("GRPO_NUM_GENERATIONS", "2")
 _SKIP_PUSH = os.environ.get("SKIP_HUB_PUSH", "0")
 _TIMEOUT = os.environ.get("HF_JOB_TIMEOUT", "8h")
@@ -71,6 +71,9 @@ _job_env = {
     "ROWS_PER_TASK": _ROWS,
     "GRPO_NUM_GENERATIONS": _NUM_GEN,
     "SKIP_HUB_PUSH": _SKIP_PUSH,
+    "TRAIN_MODEL_NAME": os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct"),
+    "TRAIN_LR": os.environ.get("TRAIN_LR", "3e-6"),
+    "TASK_EVAL_SAMPLES": os.environ.get("TASK_EVAL_SAMPLES", "16"),
     "ARTIFACT_SPACE_ID": os.environ.get("ARTIFACT_SPACE_ID", "md896/sql-debug-env"),
     "MODEL_HUB_REPO_ID": os.environ.get("MODEL_HUB_REPO_ID", "md896/sql-debug-agent-qwen05b-grpo"),
     "HARD_EVAL_SAMPLES": os.environ.get("HARD_EVAL_SAMPLES", "16"),

@@ -126,7 +126,7 @@ from trl import GRPOConfig, GRPOTrainer
 _DEFAULT_OPENENV_BASE = "https://md896-sql-debug-env.hf.space"
 BYPASS_HEADERS: Dict[str, str] = {}
 
-MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-Coder-0.5B-Instruct")
+MODEL_NAME = os.environ.get("TRAIN_MODEL_NAME", "Qwen/Qwen2.5-7B-Instruct")
 
 
 def get_bridge_url() -> str:
@@ -271,6 +271,34 @@ def eval_model_reward(
     return float(sum(rewards) / max(len(rewards), 1))
 
 
+def eval_model_reward_samples(
+    model: AutoModelForCausalLM,
+    tokenizer: AutoTokenizer,
+    dataset: Dataset,
+    *,
+    max_items: int,
+) -> List[float]:
+    subset = dataset.select(range(min(max_items, len(dataset))))
+    prompts = subset["prompt"]
+    task_ids = subset["task_id"]
+    completions: List[str] = []
+    for prompt in prompts:
+        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        with torch.no_grad():
+            out = model.generate(
+                **inputs,
+                max_new_tokens=256,
+                do_sample=True,
+                temperature=float(os.environ.get("EVAL_TEMPERATURE", "0.7")),
+                top_p=float(os.environ.get("EVAL_TOP_P", "0.9")),
+                renormalize_logits=True,
+                remove_invalid_values=True,
+                pad_token_id=tokenizer.eos_token_id,
+            )
+        completions.append(tokenizer.decode(out[0], skip_special_tokens=True))
+    return openenv_sql_reward_func(completions, task_ids)
+
+
 # --- 3b. ARTIFACTS / PLOTS (REAL, FROM LOGS) ---
 
 @dataclass(frozen=True)
@@ -380,6 +408,62 @@ def plot_reward_curve(reward_series: List[tuple[float, float]], paths: ArtifactP
     print(f"Saved {paths.reward_curve_png}")
 
 
+def plot_performance_comparison(
+    before_by_task: Dict[str, float],
+    after_by_task: Dict[str, float],
+    out_path: Path,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    task_ids = sorted(set(before_by_task) | set(after_by_task))
+    if not task_ids:
+        return
+
+    base_vals = [before_by_task.get(t, 0.0) for t in task_ids]
+    tuned_vals = [after_by_task.get(t, 0.0) for t in task_ids]
+    overall_base = sum(base_vals) / max(1, len(base_vals))
+    overall_tuned = sum(tuned_vals) / max(1, len(tuned_vals))
+
+    labels = task_ids + ["overall"]
+    base_plot = base_vals + [overall_base]
+    tuned_plot = tuned_vals + [overall_tuned]
+
+    x = list(range(len(labels)))
+    width = 0.38
+    plt.figure(figsize=(10, 5))
+    plt.bar([xi - width / 2 for xi in x], base_plot, width=width, label="base model", color="#94a3b8")
+    plt.bar([xi + width / 2 for xi in x], tuned_plot, width=width, label="trained (GRPO)", color="#2563eb")
+    plt.ylim(0.0, 1.0)
+    plt.xticks(x, labels, rotation=15, ha="right")
+    plt.ylabel("avg reward")
+    plt.title("Performance Comparison by Task (OpenEnv reward)")
+    plt.legend()
+    plt.grid(axis="y", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    print(f"Saved {out_path}")
+
+
+def plot_reward_distribution_shift(before: List[float], after: List[float], out_path: Path) -> None:
+    if not before or not after:
+        return
+    import matplotlib.pyplot as plt
+
+    plt.figure(figsize=(8, 5))
+    bins = 20
+    plt.hist(before, bins=bins, alpha=0.5, label="START", color="#f87171")
+    plt.hist(after, bins=bins, alpha=0.5, label="END", color="#22c55e")
+    plt.xlim(0.0, 1.0)
+    plt.xlabel("reward")
+    plt.ylabel("count")
+    plt.title("Reward Distribution Shift")
+    plt.legend()
+    plt.grid(axis="y", linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=200)
+    print(f"Saved {out_path}")
+
+
 def _resolve_report_to() -> str:
     raw = os.environ.get("TRL_REPORT_TO", "").strip().lower()
     if raw in ("", "auto"):
@@ -391,7 +475,7 @@ def _resolve_report_to() -> str:
 
 # --- 4. Simple GRPO training loop (live OpenEnv rewards) ---
 def run_sota_train():
-    max_steps = int(os.environ.get("TRAIN_MAX_STEPS", "200"))
+    max_steps = int(os.environ.get("TRAIN_MAX_STEPS", "240"))
     out_dir = os.environ.get("OUTPUT_DIR", "./sota_results")
 
     print(f"Starting GRPO on {MODEL_NAME}...")
@@ -422,6 +506,17 @@ def run_sota_train():
 
     print("Quick baseline eval (pre-train)...")
     baseline_avg_reward = eval_model_reward(model, tokenizer, train_dataset, max_items=8)
+
+    eval_samples = max(4, int(os.environ.get("TASK_EVAL_SAMPLES", "12")))
+    with httpx.Client(base_url=get_bridge_url(), headers=BYPASS_HEADERS, timeout=get_request_timeout()) as client:
+        eval_task_ids = _fetch_task_ids(client)
+    before_by_task: Dict[str, float] = {}
+    before_samples_all: List[float] = []
+    for t_id in eval_task_ids:
+        ds = make_task_dataset(t_id, rows_per_task=eval_samples)
+        samples = eval_model_reward_samples(model, tokenizer, ds, max_items=eval_samples)
+        before_samples_all.extend(samples)
+        before_by_task[t_id] = float(sum(samples) / max(1, len(samples)))
 
     hard_eval_n = int(os.environ.get("HARD_EVAL_SAMPLES", "16"))
     hard_dataset = make_task_dataset("hard_finance_explosion", rows_per_task=hard_eval_n)
@@ -481,6 +576,13 @@ def run_sota_train():
     print("Quick eval (post-train)...")
     post_avg_reward = eval_model_reward(model, tokenizer, train_dataset, max_items=8)
     trained_hard_reward = eval_model_reward(model, tokenizer, hard_dataset, max_items=hard_eval_n)
+    after_by_task: Dict[str, float] = {}
+    after_samples_all: List[float] = []
+    for t_id in eval_task_ids:
+        ds = make_task_dataset(t_id, rows_per_task=eval_samples)
+        samples = eval_model_reward_samples(model, tokenizer, ds, max_items=eval_samples)
+        after_samples_all.extend(samples)
+        after_by_task[t_id] = float(sum(samples) / max(1, len(samples)))
 
     # --- Save artifacts (real logs/plots) ---
     artifacts = ArtifactPaths(root=Path(out_dir) / "artifacts")
@@ -505,6 +607,9 @@ def run_sota_train():
             "base_hard_reward": base_hard_reward,
             "trained_hard_reward": trained_hard_reward,
             "delta_hard_reward": trained_hard_reward - base_hard_reward,
+            "per_task_baseline_reward": before_by_task,
+            "per_task_post_reward": after_by_task,
+            "task_eval_samples": eval_samples,
             "tensorboard_dir": str(tb_dir) if report_to == "tensorboard" else None,
             "report_to": report_to,
         }
@@ -527,6 +632,15 @@ def run_sota_train():
         print(f"Saved {out_path}")
     except Exception as e:
         print(f"Could not generate before/after plot: {e}")
+    try:
+        plot_performance_comparison(before_by_task, after_by_task, artifacts.root / "performance_comparison.png")
+        plot_reward_distribution_shift(
+            before_samples_all,
+            after_samples_all,
+            artifacts.root / "reward_distribution_shift.png",
+        )
+    except Exception as e:
+        print(f"Could not generate task/distribution plots: {e}")
 
     model_dir = os.environ.get("MODEL_SAVE_DIR", "./sota_sql_agent_full")
     print("\nSaving trained model locally...")
