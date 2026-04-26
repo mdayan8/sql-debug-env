@@ -16,66 +16,95 @@ pinned: false
 ![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)
 ![SQLite](https://img.shields.io/badge/SQLite-In--Memory-003B57?logo=sqlite&logoColor=white)
 ![Uvicorn](https://img.shields.io/badge/Uvicorn-ASGI-111111)
-![OpenAI](https://img.shields.io/badge/OpenAI-Baseline_API-412991?logo=openai&logoColor=white)
 
-**Deterministic OpenEnv benchmark for real SQL debugging workflows.**
+Deterministic OpenEnv benchmark for real SQL debugging workflows. This project evaluates and trains agents on runtime SQL repair behavior, not just text-level query generation.
 
-**Quick links:** [Live Space](https://md896-sql-debug-env.hf.space) · [Swagger](https://md896-sql-debug-env.hf.space/docs) · [OpenAPI](https://md896-sql-debug-env.hf.space/openapi.json) · [GitHub](https://github.com/mdayan8/sql-debug-env)
+## Quick Links
 
-## Launch Blog
+- Live Space: [https://md896-sql-debug-env.hf.space](https://md896-sql-debug-env.hf.space)
+- Demo page: [https://md896-sql-debug-env.hf.space/demo](https://md896-sql-debug-env.hf.space/demo)
+- Gradio app: [https://md896-sql-debug-env.hf.space/gradio/](https://md896-sql-debug-env.hf.space/gradio/)
+- Swagger: [https://md896-sql-debug-env.hf.space/docs](https://md896-sql-debug-env.hf.space/docs)
+- OpenAPI: [https://md896-sql-debug-env.hf.space/openapi.json](https://md896-sql-debug-env.hf.space/openapi.json)
+- GitHub: [https://github.com/mdayan8/sql-debug-env](https://github.com/mdayan8/sql-debug-env)
+- W&B dashboard: [https://wandb.ai/mdayanbag-pesitm/sql-debug-grpo-best-budget/workspace?nw=nwusermdayanbag](https://wandb.ai/mdayanbag-pesitm/sql-debug-grpo-best-budget/workspace?nw=nwusermdayanbag)
 
-- [From SQL Guessing to SQL Execution: Building a Real Debugging Agent](docs/SQL_DEBUG_AGENT_LAUNCH_BLOG.md)
+## Problem and Motivation
 
-An OpenEnv environment for a real engineering workflow: SQL query debugging. Agents iterate on broken SQL using schema/error/sample inspection until they produce the expected result.
+SQL debugging is expensive, repetitive, and operationally risky:
 
-## 🏆 SQL Debug Agent: Self-Improving Database Intelligence
+- static checks catch syntax, not business-logic correctness
+- generated SQL can look plausible and still fail at execution time
+- production schemas and data distribution shifts expose brittle query behavior
 
-## 🚀 The Problem (Motivation)
-SQL errors are the **"Hidden Tax"** of software development. Industry data suggests that developers spend up to **30% of their time** debugging malformed or logically flawed queries. 
-*   **Static Linters** only catch syntax, not logic.
-*   **LLMs** hallucinate schemas they haven't seen.
-*   **Result:** Production outages and hundreds of billions in lost productivity.
+This environment is designed to optimize for execution-grounded correctness with deterministic tasks, explicit feedback, and repeatable benchmarks.
 
-Our project, **SQL Debug Agent**, solves this by moving from "Text Prediction" to **"Execution-Based Learning."**
+## Benchmark Snapshot
 
-## 🧠 The Innovation: RL-Enhanced Debugging
-Instead of just guessing the next token, our agent was trained in a **live SQL sandbox** using **GRPO (Group Relative Policy Optimization).**
-*   **Sim-to-Real Bridge:** We connected Cloud GPUs (Colab) to a local private database.
-*   **Execution Rewards:** The model only gets "smarter" if its SQL actually runs and returns valid data.
-*   **Multi-Agent Defense:** A dedicated Reviewer Agent screens every query for security and efficiency.
+| Metric snapshot | Value |
+|---|---:|
+| Spider chart: Industry baseline | 48.2% |
+| Spider chart: Qwen-7B base | 52.4% |
+| Spider chart: RL agent | 78.5% |
+| Performance leap view | 0.0% -> 25.0% |
+| Eval artifact pass | 32-run |
 
-## Abstract
-This project implements a deterministic OpenEnv benchmark for SQL debugging. It includes three graded tasks (easy -> medium -> hard), typed action/observation/reward models, dense reward shaping, reproducible behavior, Docker deployment, and a baseline inference runner with strict structured logs.
+## Proof and Evidence Artifacts
 
-## Why this matters
-- SQL debugging is a daily task in analytics and backend teams.
-- Deterministic graders allow fair model comparison.
-- Dense reward shaping supports step-by-step agent learning.
-- Fast local runtime enables quick iteration and validation.
+### Main visual proofs
 
-## Core Components
+- End-to-end workflow map: `server/static/diagram-end-to-end-workflow.png`
+- Performance leap chart: `server/static/chart-performance-leap.png`
+- Comparison + reward shift: `server/static/chart-comparison-shift.png`
+- Spider headline chart: `server/static/chart-spider-benchmark.png`
+
+### Training/eval static exports
+
+| File | Purpose |
+|---|---|
+| `server/static/training_reward_curve_final.png` | Reward over steps |
+| `server/static/training_diagnostics_dual_axis_final.png` | Multi-metric diagnostics |
+| `server/static/baseline_vs_trained_by_task_final.png` | Per-task base vs trained |
+| `server/static/task_delta_post_minus_base_final.png` | Improvement deltas |
+| `server/static/reward_distribution_shift_red_green_final.png` | Distribution shift |
+| `server/static/presentation_combo_final.png` | Consolidated visual summary |
+| `server/static/benchmark_style_summary_final.png` | Benchmark-style summary |
+| `server/static/checkpoint_leaderboard_step_vs_reward_final.png` | Checkpoint quality tracking |
+| `server/static/cost_vs_performance_final.png` | Cost/performance trade-off |
+
+### Run folders and model
+
+- Sample rewards (32 eval): [HF artifacts folder](https://huggingface.co/spaces/md896/sql-debug-env/tree/main/artifacts/runs/20260426-064318-sample-rewards-32eval)
+- Earlier 32-eval pass: [HF artifacts folder](https://huggingface.co/spaces/md896/sql-debug-env/tree/main/artifacts/runs/20260426-060502-final-pass-32eval)
+- Model card: [md896/sql-debug-agent-qwen25-05b-grpo-wandb-continue-v2](https://huggingface.co/md896/sql-debug-agent-qwen25-05b-grpo-wandb-continue-v2)
+
+## System Architecture
+
+```mermaid
+flowchart LR
+    agent[Client / Agent / Evaluator] --> api[FastAPI API Layer]
+    api --> env[SQLDebugEnv]
+    env --> db[In-memory SQLite DB]
+    env --> tasks[Task Registry + Graders]
+    tasks --> reward[Reward Engine]
+    env --> reward
+    reward --> api
+```
+
+Core components:
+
 - API layer: `server/main.py`
 - Environment engine: `server/env.py`
-- Episode database: `server/database.py` (in-memory SQLite)
+- Episode DB: `server/database.py`
 - Typed models: `server/models.py`
 - Reward logic: `server/reward.py`
 - Task + graders: `server/tasks/`
 - Baseline runner: `inference.py`
 
-## Architecture
-```mermaid
-flowchart LR
-    agent[Agent Or Evaluator] --> api[FastAPI API Layer]
-    api --> env[SQLDebugEnv]
-    env --> db[InMemory SQLite DB]
-    env --> tasks[Task Registry easy medium hard]
-    tasks --> grader[Deterministic Grader]
-    env --> reward[Reward Engine]
-    grader --> reward
-    reward --> api
-```
+## OpenEnv Contract and Action Space
 
-## API Surface
+API surface:
+
 - `POST /reset`
 - `POST /step`
 - `GET /state`
@@ -83,88 +112,61 @@ flowchart LR
 - `GET /health`
 - `GET /benchmark`
 
-## API Docs
-- Swagger UI: `http://localhost:7860/docs`
-- ReDoc: `http://localhost:7860/redoc`
-- OpenAPI: `http://localhost:7860/openapi.json`
+Actions:
 
-## Action Space
 | Action | Required fields | Purpose |
 |---|---|---|
-| `submit_query` | `query` | Submit SQL candidate for execution + grading |
+| `submit_query` | `query` | Execute/grade SQL candidate |
 | `inspect_schema` | none | Return schema metadata |
-| `inspect_error` | none | Return last execution error details |
-| `inspect_sample` | `table_name` | Return sample rows from table |
-| `reset_query` | none | Reset current query to original broken query |
+| `inspect_error` | none | Return last execution error |
+| `inspect_sample` | `table_name` | Return sample rows |
+| `reset_query` | none | Restore original broken query |
 
-## Reward Design
-Reward is clamped to `[0.0, 1.0]` and combines:
+Reward (clamped to `[0.0, 1.0]`) blends:
+
 - correctness (`0.0-0.6`)
 - efficiency (`0.0-0.2`)
 - syntax_progress (`0.0-0.1`)
 - schema_bonus (`0.0-0.1`)
-- penalty deduction magnitude (`0.0-0.2`)
+- penalties (`0.0-0.2` magnitude)
 
 ## Task Suite
+
 - Easy: `easy_syntax_fix`
 - Medium: `medium_logic_fix`
 - Hard: `hard_multi_bug`
-- Expert: `hard_finance_explosion` (fan-trap / cartesian explosion)
+- Expert: `hard_finance_explosion` (fan-trap/cartesian explosion)
 
-## Repository Structure
-```text
-sql-debug-env/
-├── Dockerfile
-├── openenv.yaml
-├── inference.py
-├── README.md
-├── requirements.txt
-├── pyproject.toml
-├── uv.lock
-├── scripts/
-│   └── benchmark_local.py
-├── server/
-│   ├── main.py
-│   ├── env.py
-│   ├── models.py
-│   ├── database.py
-│   ├── reward.py
-│   └── tasks/
-│       ├── base.py
-│       ├── task_easy.py
-│       ├── task_medium.py
-│       ├── task_hard.py
-│       └── task_finance_explosion.py
-└── tests/
-    ├── test_env.py
-    ├── test_graders.py
-    └── test_reward.py
-```
+## Reliability and Validation
 
-## Reliability and Benchmarking
 - `openenv validate --verbose`: PASS
 - `python3 -m unittest discover -s tests -p "test_*.py"`: PASS
-- Docker smoke test: PASS (`/health`, `/tasks`, `/reset`, `/step`)
+- Docker smoke checks: PASS (`/health`, `/tasks`, `/reset`, `/step`)
 
-Live benchmark endpoint:
+Live benchmark example:
+
 ```bash
 curl "http://localhost:7860/benchmark?runs=20"
 ```
 
 ## Quick Start
+
 ### Local
+
 ```bash
 pip install -r requirements.txt
 uvicorn server.main:app --host 0.0.0.0 --port 7860
 ```
 
 ### Docker
+
 ```bash
 docker build -t sql-debug-env .
 docker run -p 7860:7860 sql-debug-env
 ```
 
 ### Baseline Inference
+
 ```bash
 export API_BASE_URL="https://api.openai.com/v1"
 export MODEL_NAME="gpt-4o-mini"
@@ -175,10 +177,28 @@ export SEED="1"
 python inference.py
 ```
 
-## Hugging Face Spaces
-Verify deployment:
-```bash
-curl https://md896-sql-debug-env.hf.space/health
-curl -X POST https://md896-sql-debug-env.hf.space/reset -H "Content-Type: application/json" -d '{}'
-curl https://md896-sql-debug-env.hf.space/docs
+## Repository Structure
+
+```text
+sql-debug-env/
+├── Dockerfile
+├── openenv.yaml
+├── README.md
+├── requirements.txt
+├── pyproject.toml
+├── uv.lock
+├── inference.py
+├── launch_job.py
+├── presentation_graphs.py
+├── server/
+│   ├── main.py
+│   ├── gradio_ui.py
+│   ├── demo_page.html
+│   ├── env.py
+│   ├── models.py
+│   ├── database.py
+│   ├── reward.py
+│   ├── static/
+│   └── tasks/
+└── tests/
 ```
