@@ -32,6 +32,19 @@ Deterministic OpenEnv benchmark for real SQL debugging workflows. This project e
 - GitHub: [https://github.com/mdayan8/sql-debug-env](https://github.com/mdayan8/sql-debug-env)
 - W&B dashboard: [https://wandb.ai/mdayanbag-pesitm/sql-debug-grpo-best-budget/workspace?nw=nwusermdayanbag](https://wandb.ai/mdayanbag-pesitm/sql-debug-grpo-best-budget/workspace?nw=nwusermdayanbag)
 
+## Model Card Highlights
+
+Model: [md896/sql-debug-agent-qwen25-05b-grpo-wandb-continue-v2](https://huggingface.co/md896/sql-debug-agent-qwen25-05b-grpo-wandb-continue-v2)
+
+| Field | Value |
+|---|---|
+| Task | Text generation (SQL repair style prompts) |
+| Libraries | Transformers, TRL (GRPO), Safetensors, TGI-compatible |
+| Family tags | qwen2, grpo, conversational, text-generation-inference |
+| Base tracks used in workflow | Qwen2.5-Coder 0.5B bridge + Qwen2.5-Coder 7B benchmark/eval track |
+| Training signal | Execution-grounded reward from OpenEnv SQL tasks |
+| Reference | arXiv:1910.09700 (as listed in model metadata) |
+
 ## Problem and Motivation
 
 SQL debugging is expensive, repetitive, and operationally risky:
