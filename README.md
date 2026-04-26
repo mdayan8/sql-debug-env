@@ -103,26 +103,27 @@ This design converts SQL debugging into a measurable control loop rather than pr
 
 ## Proof and Evidence Artifacts
 
-### Main visual proofs
+### End-to-end environment map
 
-- End-to-end workflow map: `server/static/diagram-end-to-end-workflow.png`
-- Performance leap chart: `server/static/chart-performance-leap.png`
-- Comparison + reward shift: `server/static/chart-comparison-shift.png`
-- Spider headline chart: `server/static/chart-spider-benchmark.png`
+![End-to-end SQL Debug workflow diagram](https://md896-sql-debug-env.hf.space/static/diagram-end-to-end-workflow.png)
 
-### Training/eval static exports
+### Core benchmark visuals
 
-| File | Purpose |
-|---|---|
-| `server/static/training_reward_curve_final.png` | Reward over steps |
-| `server/static/training_diagnostics_dual_axis_final.png` | Multi-metric diagnostics |
-| `server/static/baseline_vs_trained_by_task_final.png` | Per-task base vs trained |
-| `server/static/task_delta_post_minus_base_final.png` | Improvement deltas |
-| `server/static/reward_distribution_shift_red_green_final.png` | Distribution shift |
-| `server/static/presentation_combo_final.png` | Consolidated visual summary |
-| `server/static/benchmark_style_summary_final.png` | Benchmark-style summary |
-| `server/static/checkpoint_leaderboard_step_vs_reward_final.png` | Checkpoint quality tracking |
-| `server/static/cost_vs_performance_final.png` | Cost/performance trade-off |
+![Performance leap chart: baseline to RL-improved agent](https://md896-sql-debug-env.hf.space/static/chart-performance-leap.png)
+![Comparison chart with reward shift](https://md896-sql-debug-env.hf.space/static/chart-comparison-shift.png)
+![Spider-style benchmark headline chart](https://md896-sql-debug-env.hf.space/static/chart-spider-benchmark.png)
+
+### Training and evaluation proofs
+
+![Training reward curve over run steps](https://md896-sql-debug-env.hf.space/static/training_reward_curve_final.png)
+![Dual-axis diagnostics across training](https://md896-sql-debug-env.hf.space/static/training_diagnostics_dual_axis_final.png)
+![Baseline vs trained performance by task](https://md896-sql-debug-env.hf.space/static/baseline_vs_trained_by_task_final.png)
+![Task-level delta after training](https://md896-sql-debug-env.hf.space/static/task_delta_post_minus_base_final.png)
+![Reward distribution shift after RL training](https://md896-sql-debug-env.hf.space/static/reward_distribution_shift_red_green_final.png)
+![Consolidated presentation summary chart](https://md896-sql-debug-env.hf.space/static/presentation_combo_final.png)
+![Benchmark-style summary view](https://md896-sql-debug-env.hf.space/static/benchmark_style_summary_final.png)
+![Checkpoint leaderboard by step and reward](https://md896-sql-debug-env.hf.space/static/checkpoint_leaderboard_step_vs_reward_final.png)
+![Cost versus performance curve](https://md896-sql-debug-env.hf.space/static/cost_vs_performance_final.png)
 
 ### Run folders and model
 
