@@ -21,6 +21,9 @@ Deterministic OpenEnv benchmark for real SQL debugging workflows. This project e
 
 ## Quick Links
 
+> Maintained with reproducible Space evidence and benchmark artifacts.
+
+
 - Live Space: [https://md896-sql-debug-env.hf.space](https://md896-sql-debug-env.hf.space)
 - Demo page: [https://md896-sql-debug-env.hf.space/demo](https://md896-sql-debug-env.hf.space/demo)
 - Gradio app: [https://md896-sql-debug-env.hf.space/gradio/](https://md896-sql-debug-env.hf.space/gradio/)
