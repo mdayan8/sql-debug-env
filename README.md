@@ -39,6 +39,37 @@ SQL debugging is expensive, repetitive, and operationally risky:
 
 This environment is designed to optimize for execution-grounded correctness with deterministic tasks, explicit feedback, and repeatable benchmarks.
 
+## Training Pipeline (How We Trained)
+
+The project uses an execution-grounded RL loop where model outputs are scored by actual SQL runtime behavior.
+
+| Stage | What happens | Output artifact |
+|---|---|---|
+| 1. Bridge run | Fast wiring validation on smaller model (0.5B track) | Session traces + first sanity metrics |
+| 2. Baseline eval | Run base 7B model on the same deterministic tasks | Baseline benchmark charts |
+| 3. RL training (GRPO) | Optimize policy with reward from SQL execution + grader signals | Trained checkpoints + W&B logs |
+| 4. Hard-test eval | Re-run benchmark suite post-training | Delta charts + proof PNGs |
+| 5. Publish | Push model + Space artifacts | HF model card + Space static evidence |
+
+Training references:
+
+- Colab training entrypoint: `colab_real_world.py`
+- Job launcher: `launch_job.py`
+- Main training/eval script: `ultimate_sota_training.py`
+- W&B workspace: [sql-debug-grpo-best-budget](https://wandb.ai/mdayanbag-pesitm/sql-debug-grpo-best-budget/workspace?nw=nwusermdayanbag)
+
+## Agent Workflow (How It Works)
+
+At runtime, the agent does not "one-shot" SQL. It iterates through an environment loop:
+
+1. `POST /reset` initializes a task and returns typed observation.
+2. Agent proposes action (`submit_query`, `inspect_schema`, `inspect_error`, `inspect_sample`, `reset_query`).
+3. `POST /step` executes action in isolated session state (in-memory SQLite).
+4. Environment returns next observation + reward + done + info.
+5. Loop repeats until done/timeout, with reward shaping encouraging valid, safe, task-correct SQL.
+
+This design converts SQL debugging into a measurable control loop rather than prompt-only guessing.
+
 ## Benchmark Snapshot
 
 | Metric snapshot | Value |
@@ -48,6 +79,27 @@ This environment is designed to optimize for execution-grounded correctness with
 | Spider chart: RL agent | 78.5% |
 | Performance leap view | 0.0% -> 25.0% |
 | Eval artifact pass | 32-run |
+
+## Benchmark Themes and Failure Classes
+
+### Task themes
+
+| Theme | Representative task | Typical difficulty driver |
+|---|---|---|
+| Syntax repair | `easy_syntax_fix` | Broken tokens / malformed SQL |
+| Logic and grouping | `medium_logic_fix` | Aggregation correctness |
+| Multi-bug joins | `hard_multi_bug` | Alias/join/key mismatch |
+| Finance/cartesian risk | `hard_finance_explosion` | Fan-trap joins, unsafe blow-ups |
+
+### Common failure classes tracked
+
+| Failure class | Symptom | Why execution feedback matters |
+|---|---|---|
+| Schema mismatch | Unknown table/column | Immediate error + corrective signal |
+| Join logic bug | Duplicated/missing rows | Captures semantic correctness beyond syntax |
+| Aggregation drift | Wrong totals / GROUP BY | Deterministic graders expose numeric error |
+| Unsafe behavior | Risky or invalid query path | Reviewer/guardrail can block while preserving signal |
+| Hallucinated structure | Invented fields/relations | Penalized by execution + schema checks |
 
 ## Proof and Evidence Artifacts
 
